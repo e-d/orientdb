@@ -24,7 +24,13 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.locks.ReentrantLock;
@@ -55,13 +61,24 @@ import com.orientechnologies.orient.core.exception.OConfigurationException;
 import com.orientechnologies.orient.core.exception.OSecurityAccessException;
 import com.orientechnologies.orient.core.exception.OSecurityException;
 import com.orientechnologies.orient.core.exception.OStorageException;
+import com.orientechnologies.orient.core.metadata.security.IToken;
+import com.orientechnologies.orient.core.metadata.security.ITokenHandler;
 import com.orientechnologies.orient.core.metadata.security.ORole;
 import com.orientechnologies.orient.core.metadata.security.OUser;
 import com.orientechnologies.orient.core.security.OSecurityManager;
 import com.orientechnologies.orient.core.storage.OStorage;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.OLocalPaginatedStorage;
 import com.orientechnologies.orient.core.storage.impl.memory.ODirectMemoryStorage;
-import com.orientechnologies.orient.server.config.*;
+import com.orientechnologies.orient.server.config.OServerConfiguration;
+import com.orientechnologies.orient.server.config.OServerConfigurationLoaderXml;
+import com.orientechnologies.orient.server.config.OServerEntryConfiguration;
+import com.orientechnologies.orient.server.config.OServerHandlerConfiguration;
+import com.orientechnologies.orient.server.config.OServerNetworkListenerConfiguration;
+import com.orientechnologies.orient.server.config.OServerNetworkProtocolConfiguration;
+import com.orientechnologies.orient.server.config.OServerParameterConfiguration;
+import com.orientechnologies.orient.server.config.OServerSocketFactoryConfiguration;
+import com.orientechnologies.orient.server.config.OServerStorageConfiguration;
+import com.orientechnologies.orient.server.config.OServerUserConfiguration;
 import com.orientechnologies.orient.server.distributed.ODistributedAbstractPlugin;
 import com.orientechnologies.orient.server.distributed.ODistributedServerManager;
 import com.orientechnologies.orient.server.handler.OConfigurableHooksManager;
@@ -91,6 +108,7 @@ public class OServer {
   protected OConfigurableHooksManager                      hookManager;
   protected ODistributedServerManager                      distributedManager;
   private OPartitionedDatabasePoolFactory                  dbPoolFactory;
+  protected ITokenHandler                                  tokenHandler;
   private Random                                           random                 = new Random();
   private Map<String, Object>                              variables              = new HashMap<String, Object>();
   private String                                           serverRootDirectory;
@@ -543,6 +561,21 @@ public class OServer {
     return this;
   }
 
+  public ODatabase<?> openDatabase(final String iDbType, final String iDbUrl, final IToken iToken) {
+    final String path = getStoragePath(iDbUrl);
+
+    final ODatabaseInternal<?> database = Orient.instance().getDatabaseFactory().createDatabase(iDbType, path);
+
+    if (database.isClosed())
+      if (database.getStorage() instanceof ODirectMemoryStorage)
+        database.create();
+      else {
+        database.open(iToken);
+      }
+
+    return database;
+  }
+
   public ODatabase<?> openDatabase(final String iDbType, final String iDbUrl, final String user, final String password) {
     final String path = getStoragePath(iDbUrl);
 
@@ -608,6 +641,10 @@ public class OServer {
 
   public OPartitionedDatabasePoolFactory getDatabasePoolFactory() {
     return dbPoolFactory;
+  }
+  
+  public ITokenHandler getTokenHandler() {
+    return tokenHandler;
   }
 
   public void setServerRootDirectory(final String rootDirectory) {
@@ -789,6 +826,8 @@ public class OServer {
 
         if (handler instanceof ODistributedServerManager)
           distributedManager = (ODistributedServerManager) handler;
+        else if (handler instanceof ITokenHandler)
+          tokenHandler = (ITokenHandler) handler;
 
         pluginManager.registerPlugin(new OServerPluginInfo(handler.getName(), null, null, null, handler, null, 0, null));
 

@@ -24,7 +24,23 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TimeZone;
+import java.util.TreeSet;
 import java.util.concurrent.Callable;
 
 import com.orientechnologies.common.exception.OException;
@@ -40,7 +56,14 @@ import com.orientechnologies.orient.core.config.OContextConfiguration;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.config.OStorageEntryConfiguration;
 import com.orientechnologies.orient.core.conflict.ORecordConflictStrategy;
-import com.orientechnologies.orient.core.db.*;
+import com.orientechnologies.orient.core.db.ODatabase;
+import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
+import com.orientechnologies.orient.core.db.ODatabaseInternal;
+import com.orientechnologies.orient.core.db.ODatabaseLifecycleListener;
+import com.orientechnologies.orient.core.db.ODatabaseListener;
+import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
+import com.orientechnologies.orient.core.db.OHookReplacedRecordThreadLocal;
+import com.orientechnologies.orient.core.db.OScenarioThreadLocal;
 import com.orientechnologies.orient.core.db.record.OClassTrigger;
 import com.orientechnologies.orient.core.db.record.OCurrentStorageComponentsFactory;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
@@ -49,7 +72,14 @@ import com.orientechnologies.orient.core.db.record.ridbag.sbtree.ORidBagDeleteHo
 import com.orientechnologies.orient.core.db.record.ridbag.sbtree.OSBTreeCollectionManager;
 import com.orientechnologies.orient.core.db.record.ridbag.sbtree.OSBTreeCollectionManagerProxy;
 import com.orientechnologies.orient.core.dictionary.ODictionary;
-import com.orientechnologies.orient.core.exception.*;
+import com.orientechnologies.orient.core.exception.OConcurrentModificationException;
+import com.orientechnologies.orient.core.exception.ODatabaseException;
+import com.orientechnologies.orient.core.exception.ORecordNotFoundException;
+import com.orientechnologies.orient.core.exception.OSchemaException;
+import com.orientechnologies.orient.core.exception.OSecurityAccessException;
+import com.orientechnologies.orient.core.exception.OTransactionBlockedException;
+import com.orientechnologies.orient.core.exception.OTransactionException;
+import com.orientechnologies.orient.core.exception.OValidationException;
 import com.orientechnologies.orient.core.fetch.OFetchHelper;
 import com.orientechnologies.orient.core.hook.OHookThreadLocal;
 import com.orientechnologies.orient.core.hook.ORecordHook;
@@ -66,7 +96,16 @@ import com.orientechnologies.orient.core.metadata.OMetadata;
 import com.orientechnologies.orient.core.metadata.OMetadataDefault;
 import com.orientechnologies.orient.core.metadata.function.OFunctionTrigger;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
-import com.orientechnologies.orient.core.metadata.security.*;
+import com.orientechnologies.orient.core.metadata.security.IToken;
+import com.orientechnologies.orient.core.metadata.security.ODatabaseSecurityResources;
+import com.orientechnologies.orient.core.metadata.security.OImmutableUser;
+import com.orientechnologies.orient.core.metadata.security.ORestrictedAccessHook;
+import com.orientechnologies.orient.core.metadata.security.ORole;
+import com.orientechnologies.orient.core.metadata.security.OSecurity;
+import com.orientechnologies.orient.core.metadata.security.OSecurityTrackerHook;
+import com.orientechnologies.orient.core.metadata.security.OSecurityUser;
+import com.orientechnologies.orient.core.metadata.security.OUser;
+import com.orientechnologies.orient.core.metadata.security.OUserTrigger;
 import com.orientechnologies.orient.core.query.OQuery;
 import com.orientechnologies.orient.core.record.ORecord;
 import com.orientechnologies.orient.core.record.ORecordInternal;
@@ -78,7 +117,14 @@ import com.orientechnologies.orient.core.serialization.serializer.binary.OBinary
 import com.orientechnologies.orient.core.serialization.serializer.record.ORecordSerializer;
 import com.orientechnologies.orient.core.serialization.serializer.record.ORecordSerializerFactory;
 import com.orientechnologies.orient.core.serialization.serializer.record.string.ORecordSerializerSchemaAware2CSV;
-import com.orientechnologies.orient.core.storage.*;
+import com.orientechnologies.orient.core.storage.OPhysicalPosition;
+import com.orientechnologies.orient.core.storage.ORawBuffer;
+import com.orientechnologies.orient.core.storage.ORecordCallback;
+import com.orientechnologies.orient.core.storage.ORecordMetadata;
+import com.orientechnologies.orient.core.storage.OStorage;
+import com.orientechnologies.orient.core.storage.OStorageEmbedded;
+import com.orientechnologies.orient.core.storage.OStorageOperationResult;
+import com.orientechnologies.orient.core.storage.OStorageProxy;
 import com.orientechnologies.orient.core.storage.impl.local.OFreezableStorage;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.OLocalPaginatedStorage;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.OOfflineClusterException;
@@ -232,6 +278,76 @@ public class ODatabaseDocumentTx extends OListenerManger<ODatabaseListener> impl
         }
       }
 
+      // WAKE UP LISTENERS
+      callOnOpenListeners();
+    } catch (OException e) {
+      close();
+      throw e;
+    } catch (Exception e) {
+      close();
+      throw new ODatabaseException("Cannot open database", e);
+    }
+    return (DB) this;
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public <DB extends ODatabase> DB open(final IToken iToken) {
+    setCurrentDatabaseinThreadLocal();
+    try {
+      ORecordSerializerFactory serializerFactory = ORecordSerializerFactory.instance();
+      String serializeName = getStorage().getConfiguration().getRecordSerializer();
+      if (serializeName == null)
+        serializeName = ORecordSerializerSchemaAware2CSV.NAME;
+      serializer = serializerFactory.getFormat(serializeName);
+      if (serializer == null)
+        throw new ODatabaseException("RecordSerializer with name '" + serializeName + "' not found ");
+      if (getStorage().getConfiguration().getRecordSerializerVersion() > serializer.getMinSupportedVersion())
+        // TODO: I need a better message!
+        throw new ODatabaseException("Persistent record serializer version is not support by the current implementation");
+      componentsFactory = getStorage().getComponentsFactory();
+      final OSBTreeCollectionManager sbTreeCM = getStorage().getResource(OSBTreeCollectionManager.class.getSimpleName(),
+          new Callable<OSBTreeCollectionManager>() {
+            @Override
+            public OSBTreeCollectionManager call() throws Exception {
+              Class<? extends OSBTreeCollectionManager> managerClass = getStorage().getCollectionManagerClass();
+              if (managerClass == null) {
+                OLogManager.instance().warn(this, "Current implementation of storage does not support sbtree collections");
+                return null;
+              } else {
+                return managerClass.newInstance();
+              }
+            }
+          });
+      sbTreeCollectionManager = sbTreeCM != null ? new OSBTreeCollectionManagerProxy(this, sbTreeCM) : null;
+      localCache.startup();
+      metadata = new OMetadataDefault();
+      metadata.load();
+      recordFormat = DEF_RECORD_FORMAT;
+      if (!(getStorage() instanceof OStorageProxy)) {
+        if (metadata.getIndexManager().autoRecreateIndexesAfterCrash()) {
+          metadata.getIndexManager().recreateIndexes();
+          setCurrentDatabaseinThreadLocal();
+          user = null;
+        }
+        installHooks();
+        final OUser usr = metadata.getSecurity().authenticate(iToken);
+        if (usr != null)
+          user = new OImmutableUser(metadata.getSchema().getVersion(), usr);
+        else
+          user = null;
+      } else
+        /*
+         * --- FOR ORIENT STAFF - Is the following applicable for token auth? // REMOTE CREATE DUMMY USER user = new
+         * OUser(iUserName, OUser.encryptPassword(iUserPassword)).addRole(new ORole("passthrough", null,
+         * ORole.ALLOW_MODES.ALLOW_ALL_BUT));
+         */
+        checkSecurity(ODatabaseSecurityResources.DATABASE, ORole.PERMISSION_READ);
+      if (!metadata.getSchema().existsClass(OMVRBTreeRIDProvider.PERSISTENT_CLASS_NAME))
+        // @COMPATIBILITY 1.0RC9
+        metadata.getSchema().createClass(OMVRBTreeRIDProvider.PERSISTENT_CLASS_NAME);
       // WAKE UP LISTENERS
       callOnOpenListeners();
     } catch (OException e) {
