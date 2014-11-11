@@ -96,7 +96,7 @@ import com.orientechnologies.orient.core.metadata.OMetadata;
 import com.orientechnologies.orient.core.metadata.OMetadataDefault;
 import com.orientechnologies.orient.core.metadata.function.OFunctionTrigger;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
-import com.orientechnologies.orient.core.metadata.security.IToken;
+import com.orientechnologies.orient.core.metadata.security.OToken;
 import com.orientechnologies.orient.core.metadata.security.ODatabaseSecurityResources;
 import com.orientechnologies.orient.core.metadata.security.OImmutableUser;
 import com.orientechnologies.orient.core.metadata.security.ORestrictedAccessHook;
@@ -294,7 +294,7 @@ public class ODatabaseDocumentTx extends OListenerManger<ODatabaseListener> impl
    * {@inheritDoc}
    */
   @Override
-  public <DB extends ODatabase> DB open(final IToken iToken) {
+  public <DB extends ODatabase> DB open(final OToken iToken) {
     setCurrentDatabaseinThreadLocal();
     try {
       ORecordSerializerFactory serializerFactory = ORecordSerializerFactory.instance();

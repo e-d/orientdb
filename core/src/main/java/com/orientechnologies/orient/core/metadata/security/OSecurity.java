@@ -54,7 +54,7 @@ public interface OSecurity {
 
   public OUser authenticate(String iUsername, String iUserPassword);
 
-  public OUser authenticate(final IToken authToken);
+  public OUser authenticate(final OToken authToken);
 
   public OUser getUser(String iUserName);
 
