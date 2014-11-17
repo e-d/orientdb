@@ -19,7 +19,7 @@
    ~  */
    -->
 <project basedir="." default="compile" name="orientdb-server">
-	<property name="project.jar-classpath" value="orientdb-client-${version}.jar" />
+	<property name="project.jar-classpath" value="hamcrest-core-1.3.jar hazelcast-3.3.jar hibernate-jpa-2.0-api-1.0.0.Final.jar jansi-1.5.jar javassist.jar jline-0.9.94.jar jna-4.0.0.jar jna-platform-4.0.0.jar junit-4.11.jar mail.jar mockito-all-1.9.5.jar orientdb-client-${version}.jar orientdb-core-${version}.jar orientdb-distributed-${version}.jar orientdb-enterprise-${version}.jar orientdb-graphdb-${version}.jar orientdb-object-${version}.jar orientdb-server-${version}.jar orientdb-tools-${version}.jar pipes-2.6.0.jar rexster-core-2.6.0.jar sesame-model-2.6.10.jar sesame-query-2.6.10.jar sesame-rio-api-2.6.10.jar sesame-sail-api-2.6.10.jar snappy-java-1.1.0.1.jar antlr-2.7.7.jar asm-3.2.jar blueprints-core-2.6.0.jar commons-configuration-1.6.jar concurrentlinkedhashmap-lru-1.4.jar gremlin-groovy-2.6.0.jar gremlin-java-2.6.0.jar groovy-1.8.9.jar" />
 	<property name="project.jar-mainclass" value="com.orientechnologies.orient.server.OServerMain" />
 
   <import file="../_base/base-build.xml" />
