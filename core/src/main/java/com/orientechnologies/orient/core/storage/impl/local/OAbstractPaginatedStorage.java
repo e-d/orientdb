@@ -1000,21 +1000,21 @@ public abstract class OAbstractPaginatedStorage extends OStorageEmbedded {
     return new HashSet<String>(clusterMap.keySet());
   }
 
-  public int getClusterIdByName(final String сlusterName) {
+  public int getClusterIdByName(final String ClusterName) {
     checkOpeness();
 
-    if (сlusterName == null)
+    if (ClusterName == null)
       throw new IllegalArgumentException("Cluster name is null");
 
-    if (сlusterName.length() == 0)
+    if (ClusterName.length() == 0)
       throw new IllegalArgumentException("Cluster name is empty");
 
-    if (Character.isDigit(сlusterName.charAt(0)))
-      return Integer.parseInt(сlusterName);
+    if (Character.isDigit(ClusterName.charAt(0)))
+      return Integer.parseInt(ClusterName);
 
     // SEARCH IT BETWEEN PHYSICAL CLUSTERS
 
-    final OCluster segment = clusterMap.get(сlusterName.toLowerCase());
+    final OCluster segment = clusterMap.get(ClusterName.toLowerCase());
     if (segment != null)
       return segment.getId();
 
@@ -1171,11 +1171,11 @@ public abstract class OAbstractPaginatedStorage extends OStorageEmbedded {
   }
 
   @Override
-  public OCluster getClusterByName(final String сlusterName) {
-    final OCluster cluster = clusterMap.get(сlusterName.toLowerCase());
+  public OCluster getClusterByName(final String ClusterName) {
+    final OCluster cluster = clusterMap.get(ClusterName.toLowerCase());
 
     if (cluster == null)
-      throw new IllegalArgumentException("Cluster " + сlusterName + " does not exist in database '" + name + "'");
+      throw new IllegalArgumentException("Cluster " + ClusterName + " does not exist in database '" + name + "'");
     return cluster;
   }
 
