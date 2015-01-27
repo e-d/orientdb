@@ -1,31 +1,32 @@
 /*
-  *
-  *  *  Copyright 2014 Orient Technologies LTD (info(at)orientechnologies.com)
-  *  *
-  *  *  Licensed under the Apache License, Version 2.0 (the "License");
-  *  *  you may not use this file except in compliance with the License.
-  *  *  You may obtain a copy of the License at
-  *  *
-  *  *       http://www.apache.org/licenses/LICENSE-2.0
-  *  *
-  *  *  Unless required by applicable law or agreed to in writing, software
-  *  *  distributed under the License is distributed on an "AS IS" BASIS,
-  *  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  *  *  See the License for the specific language governing permissions and
-  *  *  limitations under the License.
-  *  *
-  *  * For more information: http://www.orientechnologies.com
-  *
-  */
+ *
+ *  *  Copyright 2014 Orient Technologies LTD (info(at)orientechnologies.com)
+ *  *
+ *  *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  *  you may not use this file except in compliance with the License.
+ *  *  You may obtain a copy of the License at
+ *  *
+ *  *       http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *  Unless required by applicable law or agreed to in writing, software
+ *  *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *  See the License for the specific language governing permissions and
+ *  *  limitations under the License.
+ *  *
+ *  * For more information: http://www.orientechnologies.com
+ *
+ */
 package com.orientechnologies.orient.graph.sql;
 
 import com.orientechnologies.orient.core.command.OCommandDistributedReplicateRequest;
 import com.orientechnologies.orient.core.command.OCommandRequest;
 import com.orientechnologies.orient.core.command.OCommandRequestText;
-import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
+import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
 import com.orientechnologies.orient.core.exception.OConcurrentModificationException;
+import com.orientechnologies.orient.core.metadata.OMetadataInternal;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.sql.OCommandExecutorSQLRetryAbstract;
 import com.orientechnologies.orient.core.sql.OCommandParameters;
@@ -51,17 +52,17 @@ import java.util.Set;
  * @author Luca Garulli
  */
 public class OCommandExecutorSQLCreateEdge extends OCommandExecutorSQLRetryAbstract implements OCommandDistributedReplicateRequest {
-  public static final String            NAME = "CREATE EDGE";
+  public static final String  NAME = "CREATE EDGE";
 
-  private String                        from;
-  private String                        to;
-  private OClass                        clazz;
-  private String                        clusterName;
-  private LinkedHashMap<String, Object> fields;
+  private String              from;
+  private String              to;
+  private OClass              clazz;
+  private String              clusterName;
+  private Map<String, Object> fields;
 
   @SuppressWarnings("unchecked")
   public OCommandExecutorSQLCreateEdge parse(final OCommandRequest iRequest) {
-    final ODatabaseRecord database = getDatabase();
+    final ODatabaseDocument database = getDatabase();
 
     init((OCommandRequestText) iRequest);
 
@@ -84,7 +85,7 @@ public class OCommandExecutorSQLCreateEdge extends OCommandExecutorSQLRetryAbstr
 
       } else if (temp.equals(KEYWORD_SET)) {
         fields = new LinkedHashMap<String, Object>();
-        parseSetFields(fields);
+        parseSetFields(clazz, fields);
 
       } else if (temp.equals(KEYWORD_CONTENT)) {
         parseContent();
@@ -92,22 +93,25 @@ public class OCommandExecutorSQLCreateEdge extends OCommandExecutorSQLRetryAbstr
       } else if (temp.equals(KEYWORD_RETRY)) {
         parseRetry();
 
-      } else if (className == null && temp.length() > 0)
+      } else if (className == null && temp.length() > 0) {
         className = temp;
+        clazz = ((OMetadataInternal) database.getMetadata()).getImmutableSchemaSnapshot().getClass(className);
+      }
 
       temp = parseOptionalWord(true);
       if (parserIsEnded())
         break;
     }
 
-    if (className == null)
+    if (className == null) {
       // ASSIGN DEFAULT CLASS
       className = "E";
+      clazz = ((OMetadataInternal) database.getMetadata()).getImmutableSchemaSnapshot().getClass(className);
+    }
 
     // GET/CHECK CLASS NAME
-    clazz = database.getMetadata().getSchema().getClass(className);
     if (clazz == null)
-      throw new OCommandSQLParsingException("Class " + className + " was not found");
+      throw new OCommandSQLParsingException("Class '" + className + "' was not found");
 
     return this;
   }
@@ -152,20 +156,21 @@ public class OCommandExecutorSQLCreateEdge extends OCommandExecutorSQLRetryAbstr
             OrientEdge edge = null;
             for (int r = 0; r < retry; ++r) {
               try {
+                if (content != null) {
+                  if (fields != null)
+                    // MERGE CONTENT WITH FIELDS
+                    fields.putAll(content.toMap());
+                  else
+                    fields = content.toMap();
+                }
+
                 edge = fromVertex.addEdge(null, toVertex, clsName, clusterName, fields);
 
                 if (fields != null && !fields.isEmpty()) {
-                  if (!edge.getRecord().getIdentity().isValid())
+                  if (edge.isLightweight())
                     edge.convertToDocument();
 
                   OSQLHelper.bindParameters(edge.getRecord(), fields, new OCommandParameters(iArgs), context);
-                }
-
-                if (content != null) {
-                  if (!edge.getRecord().getIdentity().isValid())
-                    // LIGHTWEIGHT EDGE, TRANSFORM IT BEFORE
-                    edge.convertToDocument();
-                  edge.getRecord().merge(content, true, false);
                 }
 
                 edge.save(clusterName);
@@ -203,7 +208,7 @@ public class OCommandExecutorSQLCreateEdge extends OCommandExecutorSQLRetryAbstr
   @Override
   public Set<String> getInvolvedClusters() {
     if (clazz != null)
-      return Collections.singleton(getDatabase().getClusterNameById(clazz.getClusterSelection().getCluster(clazz)));
+      return Collections.singleton(getDatabase().getClusterNameById(clazz.getClusterSelection().getCluster(clazz, null)));
     else if (clusterName != null)
       return getInvolvedClustersOfClusters(Collections.singleton(clusterName));
 

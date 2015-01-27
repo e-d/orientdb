@@ -1,22 +1,22 @@
 /*
-  *
-  *  *  Copyright 2014 Orient Technologies LTD (info(at)orientechnologies.com)
-  *  *
-  *  *  Licensed under the Apache License, Version 2.0 (the "License");
-  *  *  you may not use this file except in compliance with the License.
-  *  *  You may obtain a copy of the License at
-  *  *
-  *  *       http://www.apache.org/licenses/LICENSE-2.0
-  *  *
-  *  *  Unless required by applicable law or agreed to in writing, software
-  *  *  distributed under the License is distributed on an "AS IS" BASIS,
-  *  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  *  *  See the License for the specific language governing permissions and
-  *  *  limitations under the License.
-  *  *
-  *  * For more information: http://www.orientechnologies.com
-  *
-  */
+ *
+ *  *  Copyright 2014 Orient Technologies LTD (info(at)orientechnologies.com)
+ *  *
+ *  *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  *  you may not use this file except in compliance with the License.
+ *  *  You may obtain a copy of the License at
+ *  *
+ *  *       http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *  Unless required by applicable law or agreed to in writing, software
+ *  *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *  See the License for the specific language governing permissions and
+ *  *  limitations under the License.
+ *  *
+ *  * For more information: http://www.orientechnologies.com
+ *
+ */
 package com.orientechnologies.orient.server.hazelcast;
 
 import com.hazelcast.core.IQueue;
@@ -44,6 +44,7 @@ import com.orientechnologies.orient.server.distributed.task.OUpdateRecordTask;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -154,8 +155,8 @@ public class OHazelcastDistributedDatabase implements ODistributedDatabase {
 
     final long timeout = OGlobalConfiguration.DISTRIBUTED_QUEUE_TIMEOUT.getValueAsLong();
 
-//    try {
-//      requestLock.lock();
+    try {
+      requestLock.lock();
       try {
         // LOCK = ASSURE MESSAGES IN THE QUEUE ARE INSERTED SEQUENTIALLY AT CLUSTER LEVEL
         // BROADCAST THE REQUEST TO ALL THE NODE QUEUES
@@ -174,9 +175,9 @@ public class OHazelcastDistributedDatabase implements ODistributedDatabase {
             queue.offer(iRequest, timeout, TimeUnit.MILLISECONDS);
         }
 
-//      } finally {
-//        requestLock.unlock();
-//      }
+      } finally {
+        requestLock.unlock();
+      }
 
       if (ODistributedServerLog.isDebugEnabled())
         ODistributedServerLog.debug(this, getLocalNodeName(), iNodes.toString(), DIRECTION.OUT, "sent request %s", iRequest);
@@ -199,18 +200,20 @@ public class OHazelcastDistributedDatabase implements ODistributedDatabase {
     return restoringMessages;
   }
 
-  public OHazelcastDistributedDatabase configureDatabase(final boolean iRestoreMessages, final boolean iUnqueuePendingMessages) {
+  public OHazelcastDistributedDatabase configureDatabase(final boolean iRestoreMessages, final boolean iUnqueuePendingMessages,
+      Callable<Void> iCallback) {
     // CREATE A QUEUE PER DATABASE REQUESTS
     final String queueName = OHazelcastDistributedMessageService.getRequestQueueName(getLocalNodeName(), databaseName);
     final IQueue<ODistributedRequest> requestQueue = msgService.getQueue(queueName);
 
     unqueuePendingMessages(iRestoreMessages, iUnqueuePendingMessages, queueName, requestQueue);
 
-    final String insertQueueName = OHazelcastDistributedMessageService.getRequestQueueName(getLocalNodeName(), databaseName
-        + OCreateRecordTask.SUFFIX_QUEUE_NAME);
-    final IQueue<ODistributedRequest> insertQueue = msgService.getQueue(insertQueueName);
-
-    unqueuePendingMessages(iRestoreMessages, iUnqueuePendingMessages, insertQueueName, insertQueue);
+    if (iCallback != null)
+      try {
+        iCallback.call();
+      } catch (Exception e) {
+        throw new ODistributedException(e);
+      }
 
     setOnline();
 
@@ -218,13 +221,6 @@ public class OHazelcastDistributedDatabase implements ODistributedDatabase {
     ODistributedWorker listenerThread = new ODistributedWorker(this, requestQueue, databaseName, 0, false);
     workers.add(listenerThread);
     listenerThread.start();
-    //
-    // // CREATE WORKER THREADS FOR GENERIC REQUESTS
-    // for (int i = 1; i < numWorkers - 1; ++i) {
-    // listenerThread = new ODistributedWorker(this, requestQueue, databaseName, i, false);
-    // workers.add(listenerThread);
-    // listenerThread.start();
-    // }
 
     return this;
   }
@@ -280,7 +276,7 @@ public class OHazelcastDistributedDatabase implements ODistributedDatabase {
   protected void checkForServerOnline(ODistributedRequest iRequest) throws ODistributedException {
     final ODistributedServerManager.NODE_STATUS srvStatus = manager.getNodeStatus();
     if (srvStatus == ODistributedServerManager.NODE_STATUS.OFFLINE
-        || srvStatus == ODistributedServerManager.NODE_STATUS.SHUTDOWNING) {
+        || srvStatus == ODistributedServerManager.NODE_STATUS.SHUTTINGDOWN) {
       ODistributedServerLog.error(this, getLocalNodeName(), null, DIRECTION.OUT,
           "Local server is not online (status='%s'). Request %s will be ignored", srvStatus, iRequest);
       throw new ODistributedException("Local server is not online (status='" + srvStatus + "'). Request " + iRequest
@@ -425,7 +421,7 @@ public class OHazelcastDistributedDatabase implements ODistributedDatabase {
     final List<String> foundPartition = cfg.addNewNodeInServerList(getLocalNodeName());
     if (foundPartition != null) {
       // SET THE NODE.DB AS OFFLINE, READY TO BE SYNCHRONIZED
-      manager.setDatabaseStatus(getLocalNodeName(), databaseName, ODistributedServerManager.DB_STATUS.OFFLINE);
+      manager.setDatabaseStatus(getLocalNodeName(), databaseName, ODistributedServerManager.DB_STATUS.SYNCHRONIZING);
 
       ODistributedServerLog.info(this, getLocalNodeName(), null, DIRECTION.NONE, "adding node '%s' in partition: db=%s %s",
           getLocalNodeName(), databaseName, foundPartition);

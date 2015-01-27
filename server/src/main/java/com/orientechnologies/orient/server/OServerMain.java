@@ -31,6 +31,11 @@ public class OServerMain {
 		return instance;
 	}
 
+  public static OServer create(boolean shutdownEngineOnExit) throws Exception {
+    instance = new OServer(shutdownEngineOnExit);
+    return instance;
+  }
+
 	public static OServer server() {
 		return instance;
 	}

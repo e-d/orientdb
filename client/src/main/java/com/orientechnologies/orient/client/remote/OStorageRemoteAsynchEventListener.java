@@ -34,12 +34,12 @@ public class OStorageRemoteAsynchEventListener implements ORemoteServerEventList
 
   public void onRequest(final byte iRequestCode, final Object obj) {
     if (iRequestCode == OChannelBinaryProtocol.REQUEST_PUSH_DISTRIB_CONFIG) {
-      storage.updateClusterConfiguration((byte[]) obj);
+      storage.updateClusterConfiguration(storage.getCurrentServerURL(), (byte[]) obj);
 
       if (OLogManager.instance().isDebugEnabled()) {
         synchronized (storage.getClusterConfiguration()) {
           OLogManager.instance()
-              .debug(this, "Received new cluster configuration: %s", storage.getClusterConfiguration().toJSON(""));
+              .debug(this, "Received new cluster configuration: %s", storage.getClusterConfiguration().toJSON("prettyPrint"));
         }
       }
     }

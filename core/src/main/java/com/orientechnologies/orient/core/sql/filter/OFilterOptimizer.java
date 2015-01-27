@@ -29,7 +29,7 @@ import com.orientechnologies.orient.core.sql.operator.OQueryOperator;
 import com.orientechnologies.orient.core.sql.operator.OQueryOperatorEquals;
 
 /**
- * @author <a href="mailto:enisher@gmail.com">Artem Orobets</a>
+ * @author Artem Orobets (enisher-at-gmail.com)
  */
 public class OFilterOptimizer {
   public void optimize(OSQLFilter filter, OIndexSearchResult indexMatch) {
@@ -37,6 +37,9 @@ public class OFilterOptimizer {
   }
 
   private OSQLFilterCondition optimize(OSQLFilterCondition condition, OIndexSearchResult indexMatch) {
+    if(condition==null){
+      return null;
+    }
     OQueryOperator operator = condition.getOperator();
     while (operator == null) {
       if (condition.getRight() == null && condition.getLeft() instanceof OSQLFilterCondition) {

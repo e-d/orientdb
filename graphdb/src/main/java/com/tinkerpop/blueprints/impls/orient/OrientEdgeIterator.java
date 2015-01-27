@@ -26,6 +26,7 @@ import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.iterator.OLazyWrapperIterator;
 import com.orientechnologies.orient.core.record.ORecord;
 import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.record.impl.ODocumentInternal;
 import com.tinkerpop.blueprints.Direction;
 
 import java.util.Iterator;
@@ -72,23 +73,23 @@ public class OrientEdgeIterator extends OLazyWrapperIterator<OrientEdge> {
 
     final ODocument value = rec.getRecord();
 
-    if (value == null || value.getSchemaClass() == null)
+    if (value == null || ODocumentInternal.getImmutableSchemaClass(value) == null)
       return null;
 
     final OrientEdge edge;
-    if (value.getSchemaClass().isSubClassOf(OrientVertexType.CLASS_NAME)) {
+    if (ODocumentInternal.getImmutableSchemaClass(value).isSubClassOf(OrientVertexType.CLASS_NAME)) {
       // DIRECT VERTEX, CREATE DUMMY EDGE
       if (connection.getKey() == Direction.OUT)
-        edge = new OrientEdge(this.sourceVertex.graph, this.sourceVertex.getIdentity(), rec.getIdentity(), connection.getValue());
+        edge = new OrientEdge(this.sourceVertex.getGraph(), this.sourceVertex.getIdentity(), rec.getIdentity(), connection.getValue());
       else
-        edge = new OrientEdge(this.sourceVertex.graph, rec.getIdentity(), this.sourceVertex.getIdentity(), connection.getValue());
-    } else if (value.getSchemaClass().isSubClassOf(OrientEdgeType.CLASS_NAME)) {
+        edge = new OrientEdge(this.sourceVertex.getGraph(), rec.getIdentity(), this.sourceVertex.getIdentity(), connection.getValue());
+    } else if (ODocumentInternal.getImmutableSchemaClass(value).isSubClassOf(OrientEdgeType.CLASS_NAME)) {
       // EDGE
-      edge = new OrientEdge(this.sourceVertex.graph, rec.getIdentity());
+      edge = new OrientEdge(this.sourceVertex.getGraph(), rec.getIdentity());
     } else
       throw new IllegalStateException("Invalid content found while iterating edges, value '" + value + "' is not an edge");
 
-    if (this.sourceVertex.settings.useVertexFieldsForEdgeLabels || edge.isLabeled(labels))
+    if (this.sourceVertex.settings.isUseVertexFieldsForEdgeLabels() || edge.isLabeled(labels))
       return edge;
 
     return null;
@@ -98,6 +99,6 @@ public class OrientEdgeIterator extends OLazyWrapperIterator<OrientEdge> {
     if (targetVertex != null && !targetVertex.equals(iObject.getVertex(connection.getKey().opposite())))
       return false;
 
-    return this.sourceVertex.settings.useVertexFieldsForEdgeLabels || iObject.isLabeled(labels);
+    return this.sourceVertex.settings.isUseVertexFieldsForEdgeLabels() || iObject.isLabeled(labels);
   }
 }

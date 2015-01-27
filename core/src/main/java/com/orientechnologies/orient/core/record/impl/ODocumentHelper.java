@@ -23,8 +23,8 @@ import com.orientechnologies.common.collection.OMultiValue;
 import com.orientechnologies.common.util.OPair;
 import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.command.OCommandContext;
-import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.config.OStorageConfiguration;
+import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.record.*;
 import com.orientechnologies.orient.core.db.record.ORecordElement.STATUS;
@@ -41,7 +41,6 @@ import com.orientechnologies.orient.core.serialization.serializer.record.string.
 import com.orientechnologies.orient.core.sql.OSQLHelper;
 import com.orientechnologies.orient.core.sql.functions.OSQLFunctionRuntime;
 import com.orientechnologies.orient.core.type.tree.OMVRBTreeRIDSet;
-import com.orientechnologies.orient.core.version.ODistributedVersion;
 
 import java.lang.reflect.Array;
 import java.text.DateFormat;
@@ -56,18 +55,16 @@ import java.util.Map.Entry;
  * @author Luca Garulli
  */
 public class ODocumentHelper {
-  public static final String ATTRIBUTE_THIS               = "@this";
-  public static final String ATTRIBUTE_RID                = "@rid";
-  public static final String ATTRIBUTE_RID_ID             = "@rid_id";
-  public static final String ATTRIBUTE_RID_POS            = "@rid_pos";
-  public static final String ATTRIBUTE_VERSION            = "@version";
-  public static final String ATTRIBUTE_VERSION_TIMESTAMP  = "@version_time";
-  public static final String ATTRIBUTE_VERSION_MACADDRESS = "@version_mac";
-  public static final String ATTRIBUTE_CLASS              = "@class";
-  public static final String ATTRIBUTE_TYPE               = "@type";
-  public static final String ATTRIBUTE_SIZE               = "@size";
-  public static final String ATTRIBUTE_FIELDS             = "@fields";
-  public static final String ATTRIBUTE_RAW                = "@raw";
+  public static final String ATTRIBUTE_THIS    = "@this";
+  public static final String ATTRIBUTE_RID     = "@rid";
+  public static final String ATTRIBUTE_RID_ID  = "@rid_id";
+  public static final String ATTRIBUTE_RID_POS = "@rid_pos";
+  public static final String ATTRIBUTE_VERSION = "@version";
+  public static final String ATTRIBUTE_CLASS   = "@class";
+  public static final String ATTRIBUTE_TYPE    = "@type";
+  public static final String ATTRIBUTE_SIZE    = "@size";
+  public static final String ATTRIBUTE_FIELDS  = "@fields";
+  public static final String ATTRIBUTE_RAW     = "@raw";
 
   public static interface ODbRelatedCall<T> {
     public T call();
@@ -292,7 +289,8 @@ public class ODocumentHelper {
           final Object index = getIndexPart(iContext, indexPart);
           final String indexAsString = index != null ? index.toString() : null;
 
-          final List<String> indexParts = OStringSerializerHelper.smartSplit(indexAsString, ',');
+          final List<String> indexParts = OStringSerializerHelper.smartSplit(indexAsString, ',',
+              OStringSerializerHelper.DEFAULT_IGNORE_CHARS);
           final List<String> indexRanges = OStringSerializerHelper.smartSplit(indexAsString, '-', ' ');
           final List<String> indexCondition = OStringSerializerHelper.smartSplit(indexAsString, '=', ' ');
 
@@ -303,7 +301,7 @@ public class ODocumentHelper {
             // MULTI VALUE
             final Object[] values = new Object[indexParts.size()];
             for (int i = 0; i < indexParts.size(); ++i) {
-              values[i] = ((ODocument) record).field(indexParts.get(i));
+              values[i] = ((ODocument) record).field(OStringSerializerHelper.getStringContent(indexParts.get(i)));
             }
             value = values;
           } else if (indexRanges.size() > 1) {
@@ -312,7 +310,7 @@ public class ODocumentHelper {
             String from = indexRanges.get(0);
             String to = indexRanges.get(1);
 
-            final ODocument doc = ((ODocument) ((OIdentifiable) value).getRecord());
+            final ODocument doc = (ODocument) record;
 
             final String[] fieldNames = doc.fieldNames();
             final int rangeFrom = from != null && !from.isEmpty() ? Integer.parseInt(from) : 0;
@@ -344,21 +342,61 @@ public class ODocumentHelper {
               value = null;
           }
         } else if (value instanceof Map<?, ?>) {
-          final List<String> indexParts = OStringSerializerHelper.smartSplit(indexPart, ',',
+          final Object index = getIndexPart(iContext, indexPart);
+          final String indexAsString = index != null ? index.toString() : null;
+
+          final List<String> indexParts = OStringSerializerHelper.smartSplit(indexAsString, ',',
               OStringSerializerHelper.DEFAULT_IGNORE_CHARS);
-          if (indexParts.size() == 1) {
+          final List<String> indexRanges = OStringSerializerHelper.smartSplit(indexAsString, '-', ' ');
+          final List<String> indexCondition = OStringSerializerHelper.smartSplit(indexAsString, '=', ' ');
+
+          final Map<String, ?> map = (Map<String, ?>) value;
+          if (indexParts.size() == 1 && indexCondition.size() == 1 && indexRanges.size() == 1)
             // SINGLE VALUE
-            final Object index = getIndexPart(iContext, indexPart);
-            value = ((Map<?, ?>) value).get(index);
-          } else {
+            value = map.get(indexAsString);
+          else if (indexParts.size() > 1) {
             // MULTI VALUE
             final Object[] values = new Object[indexParts.size()];
             for (int i = 0; i < indexParts.size(); ++i) {
-              final Object index = getIndexPart(iContext, indexParts.get(i));
-              values[i] = ((Map<?, ?>) value).get(index);
+              values[i] = map.get(OStringSerializerHelper.getStringContent(indexParts.get(i)));
             }
             value = values;
+          } else if (indexRanges.size() > 1) {
+
+            // MULTI VALUES RANGE
+            String from = indexRanges.get(0);
+            String to = indexRanges.get(1);
+
+            final List<String> fieldNames = new ArrayList<String>(map.keySet());
+            final int rangeFrom = from != null && !from.isEmpty() ? Integer.parseInt(from) : 0;
+            final int rangeTo = to != null && !to.isEmpty() ? Math.min(Integer.parseInt(to), fieldNames.size() - 1) : fieldNames
+                .size() - 1;
+
+            final Object[] values = new Object[rangeTo - rangeFrom + 1];
+
+            for (int i = rangeFrom; i <= rangeTo; ++i)
+              values[i - rangeFrom] = map.get(fieldNames.get(i));
+
+            value = values;
+
+          } else if (!indexCondition.isEmpty()) {
+            // CONDITION
+            final String conditionFieldName = indexCondition.get(0);
+            Object conditionFieldValue = ORecordSerializerStringAbstract.getTypeValue(indexCondition.get(1));
+
+            if (conditionFieldValue instanceof String)
+              conditionFieldValue = OStringSerializerHelper.getStringContent(conditionFieldValue);
+
+            final Object fieldValue = map.get(conditionFieldName);
+
+            if (conditionFieldValue != null && fieldValue != null)
+              conditionFieldValue = OType.convert(conditionFieldValue, fieldValue.getClass());
+
+            if (fieldValue == null && !conditionFieldValue.equals("null") || fieldValue != null
+                && !fieldValue.equals(conditionFieldValue))
+              value = null;
           }
+
         } else if (OMultiValue.isMultiValue(value)) {
           // MULTI VALUE
           final Object index = getIndexPart(iContext, indexPart);
@@ -502,7 +540,7 @@ public class ODocumentHelper {
 
   protected static Object getIndexPart(final OCommandContext iContext, final String indexPart) {
     Object index = indexPart;
-    if (indexPart.charAt(0) == '"' || indexPart.charAt(0) == '\'')
+    if (indexPart.indexOf(',') == -1 && ( indexPart.charAt(0) == '"' || indexPart.charAt(0) == '\'') )
       index = OStringSerializerHelper.getStringContent(indexPart);
     else if (indexPart.charAt(0) == '$') {
       final Object ctxValue = iContext.getVariable(indexPart);
@@ -594,12 +632,6 @@ public class ODocumentHelper {
         return iCurrent.getIdentity().getClusterPosition();
       else if (iFieldName.equalsIgnoreCase(ATTRIBUTE_VERSION))
         return iCurrent.getRecord().getRecordVersion().getCounter();
-      else if (iFieldName.equalsIgnoreCase(ATTRIBUTE_VERSION_TIMESTAMP)
-          && OGlobalConfiguration.DB_USE_DISTRIBUTED_VERSION.getValueAsBoolean())
-        return ((ODistributedVersion) iCurrent.getRecord().getRecordVersion()).getTimestamp();
-      else if (iFieldName.equalsIgnoreCase(ATTRIBUTE_VERSION_MACADDRESS)
-          && OGlobalConfiguration.DB_USE_DISTRIBUTED_VERSION.getValueAsBoolean())
-        return ((ODistributedVersion) iCurrent.getRecord().getRecordVersion()).getMacAddress();
       else if (iFieldName.equalsIgnoreCase(ATTRIBUTE_CLASS))
         return ((ODocument) iCurrent.getRecord()).getClassName();
       else if (iFieldName.equalsIgnoreCase(ATTRIBUTE_TYPE))
@@ -800,15 +832,15 @@ public class ODocumentHelper {
         iCloned._fieldValues.put(iEntry.getKey(), new LinkedHashMap<String, Object>((Map<String, Object>) fieldValue));
       } else
         iCloned._fieldValues.put(iEntry.getKey(), fieldValue);
-    } else if (iCloned.getSchemaClass() != null) {
-      final OProperty prop = iCloned.getSchemaClass().getProperty(iEntry.getKey());
+    } else if (iCloned.getImmutableSchemaClass() != null) {
+      final OProperty prop = iCloned.getImmutableSchemaClass().getProperty(iEntry.getKey());
       if (prop != null && prop.isMandatory())
         iCloned._fieldValues.put(iEntry.getKey(), fieldValue);
     }
   }
 
-  public static boolean hasSameContentItem(final Object iCurrent, ODatabaseRecordInternal iMyDb, final Object iOther,
-      final ODatabaseRecordInternal iOtherDb, RIDMapper ridMapper) {
+  public static boolean hasSameContentItem(final Object iCurrent, ODatabaseDocumentInternal iMyDb, final Object iOther,
+      final ODatabaseDocumentInternal iOtherDb, RIDMapper ridMapper) {
     if (iCurrent instanceof ODocument) {
       final ODocument current = (ODocument) iCurrent;
       if (iOther instanceof ORID) {
@@ -837,8 +869,8 @@ public class ODocumentHelper {
    * @see #equals(Object)
    */
   @SuppressWarnings("unchecked")
-  public static boolean hasSameContentOf(final ODocument iCurrent, final ODatabaseRecordInternal iMyDb, final ODocument iOther,
-      final ODatabaseRecordInternal iOtherDb, RIDMapper ridMapper) {
+  public static boolean hasSameContentOf(final ODocument iCurrent, final ODatabaseDocumentInternal iMyDb, final ODocument iOther,
+      final ODatabaseDocumentInternal iOtherDb, RIDMapper ridMapper) {
     return hasSameContentOf(iCurrent, iMyDb, iOther, iOtherDb, ridMapper, true);
   }
 
@@ -852,8 +884,8 @@ public class ODocumentHelper {
    * @see #equals(Object)
    */
   @SuppressWarnings("unchecked")
-  public static boolean hasSameContentOf(final ODocument iCurrent, final ODatabaseRecordInternal iMyDb, final ODocument iOther,
-      final ODatabaseRecordInternal iOtherDb, RIDMapper ridMapper, final boolean iCheckAlsoIdentity) {
+  public static boolean hasSameContentOf(final ODocument iCurrent, final ODatabaseDocumentInternal iMyDb, final ODocument iOther,
+      final ODatabaseDocumentInternal iOtherDb, RIDMapper ridMapper, final boolean iCheckAlsoIdentity) {
     if (iOther == null)
       return false;
 
@@ -943,8 +975,8 @@ public class ODocumentHelper {
     return true;
   }
 
-  public static boolean compareMaps(ODatabaseRecordInternal iMyDb, Map<Object, Object> myFieldValue,
-      ODatabaseRecordInternal iOtherDb, Map<Object, Object> otherFieldValue, RIDMapper ridMapper) {
+  public static boolean compareMaps(ODatabaseDocumentInternal iMyDb, Map<Object, Object> myFieldValue,
+      ODatabaseDocumentInternal iOtherDb, Map<Object, Object> otherFieldValue, RIDMapper ridMapper) {
     // CHECK IF THE ORDER IS RESPECTED
     final Map<Object, Object> myMap = myFieldValue;
     final Map<Object, Object> otherMap = otherFieldValue;
@@ -1034,8 +1066,8 @@ public class ODocumentHelper {
     }
   }
 
-  public static boolean compareCollections(ODatabaseRecordInternal iMyDb, Collection<?> myFieldValue,
-      ODatabaseRecordInternal iOtherDb, Collection<?> otherFieldValue, RIDMapper ridMapper) {
+  public static boolean compareCollections(ODatabaseDocumentInternal iMyDb, Collection<?> myFieldValue,
+      ODatabaseDocumentInternal iOtherDb, Collection<?> otherFieldValue, RIDMapper ridMapper) {
     final Collection<?> myCollection = myFieldValue;
     final Collection<?> otherCollection = otherFieldValue;
 
@@ -1098,7 +1130,7 @@ public class ODocumentHelper {
     }
   }
 
-  public static boolean compareSets(ODatabaseRecordInternal iMyDb, Set<?> myFieldValue, ODatabaseRecordInternal iOtherDb,
+  public static boolean compareSets(ODatabaseDocumentInternal iMyDb, Set<?> myFieldValue, ODatabaseDocumentInternal iOtherDb,
       Set<?> otherFieldValue, RIDMapper ridMapper) {
     final Set<?> mySet = myFieldValue;
     final Set<?> otherSet = otherFieldValue;
@@ -1184,7 +1216,7 @@ public class ODocumentHelper {
     }
   }
 
-  public static boolean compareBags(ODatabaseRecordInternal iMyDb, ORidBag myFieldValue, ODatabaseRecordInternal iOtherDb,
+  public static boolean compareBags(ODatabaseDocumentInternal iMyDb, ORidBag myFieldValue, ODatabaseDocumentInternal iOtherDb,
       ORidBag otherFieldValue, RIDMapper ridMapper) {
     final ORidBag myBag = myFieldValue;
     final ORidBag otherBag = otherFieldValue;
@@ -1295,9 +1327,12 @@ public class ODocumentHelper {
       if (myArraySize != otherArraySize)
         return false;
 
-      for (int i = 0; i < myArraySize; i++)
-        if (!Array.get(myValue, i).equals(Array.get(otherValue, i)))
+      for (int i = 0; i < myArraySize; i++) {
+        final Object first = Array.get(myValue, i);
+        final Object second = Array.get(otherValue, i);
+        if (first == null && second != null || (first != null && !first.equals(second)))
           return false;
+      }
 
       return true;
     }
@@ -1359,7 +1394,7 @@ public class ODocumentHelper {
     }
   }
 
-  public static <T> T makeDbCall(final ODatabaseRecordInternal databaseRecord, final ODbRelatedCall<T> function) {
+  public static <T> T makeDbCall(final ODatabaseDocumentInternal databaseRecord, final ODbRelatedCall<T> function) {
     ODatabaseRecordThreadLocal.INSTANCE.set(databaseRecord);
     return function.call();
   }
