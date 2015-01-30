@@ -22,29 +22,55 @@ package com.orientechnologies.orient.server;
 import java.io.IOException;
 
 import com.orientechnologies.common.console.DefaultConsoleReader;
+import com.orientechnologies.common.log.OLogManager;
 
 public class OServerMain {
-	private static OServer instance;
+	private OServer server;
+	private static OServerMain instance;
+	
+	static {
+		instance = new OServerMain();
+	}
 
 	public static OServer create() throws Exception {
-		instance = new OServer();
-		return instance;
+		instance.server = new OServer();
+		return instance.server;
 	}
 
-  public static OServer create(boolean shutdownEngineOnExit) throws Exception {
-    instance = new OServer(shutdownEngineOnExit);
-    return instance;
-  }
+	public static OServer create(boolean shutdownEngineOnExit) throws Exception {
+		instance.server = new OServer(shutdownEngineOnExit);
+		return instance.server;
+	}
 
 	public static OServer server() {
-		return instance;
+		return instance.server;
 	}
 
-	public static void main(final String[] args) throws Exception {
-		instance = OServerMain.create();
-		instance.startup().activate();
-
-		preventServiceStop();
+	public static void main(final String[] args) {
+		try {
+			// To enable use of OrientDB by Apache Commons Daemon, we need to check arguments.
+			if (args != null && args.length > 0 && args[0].equalsIgnoreCase("stop")) {
+				shutdown();
+			} else {
+				// Assume "start" otherwise.
+				OLogManager.instance().info(instance, "Creating server...");
+				instance.server = OServerMain.create();
+				instance.server.startup().activate();
+				preventServiceStop();
+			}
+		} catch (Throwable t) {
+			OLogManager.instance().error(instance, "Failed to start server.", t);
+			t.printStackTrace();
+		}
+	}
+	
+	/**
+	 * Called by the "stop" fuction of Apache Commons Daemon.
+	 */
+	private static void shutdown() {
+		OLogManager.instance().info(instance, "Shutdown service request received...");
+		instance.server.shutdown();
+		enableServiceStop();
 	}
 
 	/**
@@ -54,9 +80,9 @@ public class OServerMain {
 	 * @throws IOException
 	 */
 	private static void preventServiceStop() throws IOException {
-		System.out.println("Preventing JVM from exiting by waiting for console input...");
+		OLogManager.instance().info(instance, "Preventing JVM from exiting by waiting for console input...");
 		String exitInput = new DefaultConsoleReader().readLine();
-		System.out.println("Console input read returned (" + exitInput + ").");
+		OLogManager.instance().info(instance, "Console input read returned (" + exitInput + ").");
 	}
 	
 	/**
@@ -65,13 +91,13 @@ public class OServerMain {
 	 * 
 	 * @throws IOException
 	 */
-	public static void enableServiceStop() {
-		System.out.println("Re-enabling JVM exit by closing console input...");
+	private static void enableServiceStop() {
+		OLogManager.instance().info(instance, "Re-enabling JVM exit by closing console input...");
 		try {
 			System.in.close();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		System.out.println("Console input closed.");
+		OLogManager.instance().info(instance, "Console input closed.");
 	}
 }

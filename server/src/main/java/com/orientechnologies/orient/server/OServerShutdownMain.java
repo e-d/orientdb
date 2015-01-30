@@ -19,22 +19,22 @@
       */
 package com.orientechnologies.orient.server;
 
-import java.io.IOException;
-import java.util.Arrays;
-
 import com.orientechnologies.common.log.OLogManager;
-import com.orientechnologies.orient.client.db.ODatabaseHelper;
-import com.orientechnologies.orient.core.config.OContextConfiguration;
-import com.orientechnologies.orient.core.exception.OConfigurationException;
-import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinaryAsynchClient;
-import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinaryAsynchClientSynch;
-import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinaryProtocol;
-import com.orientechnologies.orient.enterprise.channel.binary.ONetworkProtocolException;
-import com.orientechnologies.orient.server.config.OServerConfiguration;
-import com.orientechnologies.orient.server.config.OServerConfigurationLoaderXml;
-import com.orientechnologies.orient.server.config.OServerNetworkListenerConfiguration;
-import com.orientechnologies.orient.server.config.OServerUserConfiguration;
-import com.orientechnologies.orient.server.network.OServerNetworkListener;
+ import com.orientechnologies.orient.client.db.ODatabaseHelper;
+ import com.orientechnologies.orient.core.config.OContextConfiguration;
+ import com.orientechnologies.orient.core.exception.OConfigurationException;
+ import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinaryAsynchClient;
+ import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinaryAsynchClientSynch;
+ import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinaryProtocol;
+ import com.orientechnologies.orient.enterprise.channel.binary.ONetworkProtocolException;
+ import com.orientechnologies.orient.server.config.OServerConfiguration;
+ import com.orientechnologies.orient.server.config.OServerConfigurationLoaderXml;
+ import com.orientechnologies.orient.server.config.OServerNetworkListenerConfiguration;
+ import com.orientechnologies.orient.server.config.OServerUserConfiguration;
+ import com.orientechnologies.orient.server.network.OServerNetworkListener;
+
+ import java.io.IOException;
+ import java.util.Arrays;
 
 /**
   * Sends a shutdown command to the server.
@@ -141,8 +141,6 @@ import com.orientechnologies.orient.server.network.OServerNetworkListener;
      } catch (Exception e) {
        System.out.println("Error: " + e.getLocalizedMessage());
      }
-     
      System.out.println();
-     OServerMain.enableServiceStop();
    }
  }
