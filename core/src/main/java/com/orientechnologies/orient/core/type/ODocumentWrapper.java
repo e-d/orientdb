@@ -35,6 +35,8 @@ import com.orientechnologies.orient.core.record.impl.ODocument;
  */
 @SuppressWarnings("unchecked")
 public class ODocumentWrapper implements Serializable {
+  public static final String CLASS_NAME = "ODocumentWrapper";
+
   @ODocumentInstance
   protected ODocument document;
 

@@ -83,6 +83,7 @@ import com.orientechnologies.orient.core.sql.OCommandSQL;
 import com.orientechnologies.orient.core.storage.OPhysicalPosition;
 import com.orientechnologies.orient.core.storage.OStorage;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.OLocalPaginatedStorage;
+import com.orientechnologies.orient.core.type.ODocumentWrapper;
 import com.orientechnologies.orient.core.type.tree.OMVRBTreeRIDSet;
 import com.orientechnologies.orient.core.type.tree.provider.OMVRBTreeRIDProvider;
 import com.orientechnologies.orient.core.version.OVersionFactory;
@@ -599,7 +600,7 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
     for (OClass dbClass : classes) {
       String className = dbClass.getName();
       if (!className.equalsIgnoreCase(ORole.CLASS_NAME) && !className.equalsIgnoreCase(OUser.CLASS_NAME)
-          && !className.equalsIgnoreCase(OSecurityShared.IDENTITY_CLASSNAME)) {
+    		  && !className.equalsIgnoreCase(OSecurityShared.IDENTITY_CLASSNAME) && !className.equalsIgnoreCase(ODocumentWrapper.CLASS_NAME)) {
         classesToDrop.put(className, dbClass);
       }
     }
@@ -1108,33 +1109,37 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
 
     listener.onMessage("\nRebuilding indexes of truncated clusters ...");
 
-    for (final String indexName : indexesToRebuild)
-      database.getMetadata().getIndexManager().getIndex(indexName).rebuild(new OProgressListener() {
-        private long last = 0;
-
-        @Override
-        public void onBegin(Object iTask, long iTotal, Object metadata) {
-          listener.onMessage("\n- Cluster content was updated: rebuilding index '" + indexName + "'...");
-        }
-
-        @Override
-        public boolean onProgress(Object iTask, long iCounter, float iPercent) {
-          final long now = System.currentTimeMillis();
-          if (last == 0)
-            last = now;
-          else if (now - last > 1000) {
-            listener.onMessage(String.format("\nIndex '%s' is rebuilding (%.2f/100)", indexName, iPercent));
-            last = now;
+    for (final String indexName : indexesToRebuild) {
+      try {
+        database.getMetadata().getIndexManager().getIndex(indexName).rebuild(new OProgressListener() {
+          private long last = 0;
+  
+          @Override
+          public void onBegin(Object iTask, long iTotal, Object metadata) {
+            listener.onMessage("\n- Cluster content was updated: rebuilding index '" + indexName + "'...");
           }
-          return true;
-        }
-
-        @Override
-        public void onCompletition(Object iTask, boolean iSucceed) {
-          listener.onMessage(" Index " + indexName + " was successfully rebuilt.");
-        }
-      });
-
+  
+          @Override
+          public boolean onProgress(Object iTask, long iCounter, float iPercent) {
+            final long now = System.currentTimeMillis();
+            if (last == 0)
+              last = now;
+            else if (now - last > 1000) {
+              listener.onMessage(String.format("\nIndex '%s' is rebuilding (%.2f/100)", indexName, iPercent));
+              last = now;
+            }
+            return true;
+          }
+  
+          @Override
+          public void onCompletition(Object iTask, boolean iSucceed) {
+            listener.onMessage(" Index " + indexName + " was successfully rebuilt.");
+          }
+        });
+      } catch (Exception e) {
+        listener.onMessage("\nWARNING: Couldn't rebuild index: " + indexName + " because: " + e.getMessage());
+      }
+    }
     listener.onMessage("\nDone " + indexesToRebuild.size() + " indexes were rebuilt.");
 
     if (recreateManualIndex) {
