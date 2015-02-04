@@ -20,13 +20,14 @@
 package com.orientechnologies.orient.server;
 
 import java.io.IOException;
+import java.nio.channels.Selector;
 
-import com.orientechnologies.common.console.DefaultConsoleReader;
 import com.orientechnologies.common.log.OLogManager;
 
 public class OServerMain {
 	private OServer server;
 	private static OServerMain instance;
+	private static Selector serviceStopPreventionSelector;
 	
 	static {
 		instance = new OServerMain();
@@ -65,7 +66,7 @@ public class OServerMain {
 	}
 	
 	/**
-	 * Called by the "stop" fuction of Apache Commons Daemon.
+	 * Called by the "stop" function of Apache Commons Daemon.
 	 */
 	private static void shutdown() {
 		OLogManager.instance().info(instance, "Shutdown service request received...");
@@ -75,29 +76,31 @@ public class OServerMain {
 
 	/**
 	 * To make OrientDB compatible with Apache Commons Daemon (to be a Windows service), we have to keep the main 
-	 * method from returning. Waiting for console input seems to do the trick.
+	 * method from returning. Waiting for a selector action seems to do the trick.
 	 * 
 	 * @throws IOException
 	 */
 	private static void preventServiceStop() throws IOException {
-		OLogManager.instance().info(instance, "Preventing JVM from exiting by waiting for console input...");
-		String exitInput = new DefaultConsoleReader().readLine();
-		OLogManager.instance().info(instance, "Console input read returned (" + exitInput + ").");
+		OLogManager.instance().info(instance, "Preventing JVM from exiting by waiting for selector action...");
+		int exitInput = 0;
+		try {
+			serviceStopPreventionSelector = Selector.open();
+			exitInput = serviceStopPreventionSelector.select(); // Blocks until wakeup is called.
+		} catch (Exception e) {
+			OLogManager.instance().error(instance, "Couldn't wait for selector wakeup.", e);
+		}
+		OLogManager.instance().info(instance, "Selector returned with code: " + exitInput + ".");
 	}
 	
 	/**
 	 * To make OrientDB compatible with Apache Commons Daemon (to be a Windows service), we have to keep the main 
-	 * method from returning. This closes console input to make the main method return.
+	 * method from returning. This wakes up a selector to make the main method return.
 	 * 
 	 * @throws IOException
 	 */
 	private static void enableServiceStop() {
-		OLogManager.instance().info(instance, "Re-enabling JVM exit by closing console input...");
-		try {
-			System.in.close();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-		OLogManager.instance().info(instance, "Console input closed.");
+		OLogManager.instance().info(instance, "Re-enabling JVM exit by waking up the selector...");
+		serviceStopPreventionSelector.wakeup();
+		OLogManager.instance().info(instance, "Selector has been awoken.");
 	}
 }
