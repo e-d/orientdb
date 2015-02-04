@@ -80,7 +80,7 @@ public class OServerMain {
 	 * 
 	 * @throws IOException
 	 */
-	private static void preventServiceStop() throws IOException {
+	private static void preventServiceStop() {
 		OLogManager.instance().info(instance, "Preventing JVM from exiting by waiting for selector action...");
 		int exitInput = 0;
 		try {
