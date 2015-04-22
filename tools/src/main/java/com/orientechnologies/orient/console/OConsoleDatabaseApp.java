@@ -43,11 +43,7 @@ import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.db.record.ORecordLazyMultiValue;
-import com.orientechnologies.orient.core.db.tool.ODatabaseCompare;
-import com.orientechnologies.orient.core.db.tool.ODatabaseExport;
-import com.orientechnologies.orient.core.db.tool.ODatabaseExportException;
-import com.orientechnologies.orient.core.db.tool.ODatabaseImport;
-import com.orientechnologies.orient.core.db.tool.ODatabaseImportException;
+import com.orientechnologies.orient.core.db.tool.*;
 import com.orientechnologies.orient.core.exception.ODatabaseException;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.index.OIndex;
@@ -77,27 +73,20 @@ import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedSt
 import sun.misc.Signal;
 import sun.misc.SignalHandler;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.lang.reflect.Array;
 import java.util.*;
 import java.util.Map.Entry;
 
 public class OConsoleDatabaseApp extends OrientConsole implements OCommandOutputListener, OProgressListener {
   protected static final int    DEFAULT_WIDTH      = 150;
-  private int                   windowSize         = DEFAULT_WIDTH;
   protected ODatabaseDocumentTx currentDatabase;
   protected String              currentDatabaseName;
   protected ORecord             currentRecord;
   protected int                 currentRecordIdx;
   protected List<OIdentifiable> currentResultSet;
   protected OServerAdmin        serverAdmin;
+  private int                   windowSize         = DEFAULT_WIDTH;
   private int                   lastPercentStep;
   private String                currentDatabaseUserName;
   private String                currentDatabaseUserPassword;
@@ -1118,17 +1107,17 @@ public class OConsoleDatabaseApp extends OrientConsole implements OCommandOutput
     message("\nClass................: " + cls);
     if (cls.getShortName() != null)
       message("\nAlias................: " + cls.getShortName());
-    if (cls.getSuperClass() != null)
-      message("\nSuper class..........: " + cls.getSuperClass());
+    if (cls.hasSuperClasses())
+      message("\nSuper classes..........: " + Arrays.toString(cls.getSuperClassesNames().toArray()));
     message("\nDefault cluster......: " + currentDatabase.getClusterNameById(cls.getDefaultClusterId()) + " (id="
         + cls.getDefaultClusterId() + ")");
     message("\nSupported cluster ids: " + Arrays.toString(cls.getClusterIds()));
     message("\nCluster selection....: " + cls.getClusterSelection().getName());
 
-    if (!cls.getBaseClasses().isEmpty()) {
-      message("\nBase classes.........: ");
+    if (!cls.getSubclasses().isEmpty()) {
+      message("\nSubclasses.........: ");
       int i = 0;
-      for (OClass c : cls.getBaseClasses()) {
+      for (OClass c : cls.getSubclasses()) {
         if (i > 0)
           message(", ");
         message(c.getName());
@@ -1306,9 +1295,9 @@ public class OConsoleDatabaseApp extends OrientConsole implements OCommandOutput
           count = currentDatabase.countClass(cls.getName(), false);
           totalElements += count;
 
-          final String superClass = cls.getSuperClass() != null ? cls.getSuperClass().getName() : "";
+          final String superClasses = cls.hasSuperClasses()? Arrays.toString(cls.getSuperClassesNames().toArray()) : "";
 
-          message("\n %-45s| %-35s| %-11s|%15d |", format(cls.getName(), 45), format(superClass, 35), clusters.toString(), count);
+          message("\n %-45s| %-35s| %-11s|%15d |", format(cls.getName(), 45), format(superClasses, 35), clusters.toString(), count);
         } catch (Exception ignored) {
         }
       }
@@ -1560,13 +1549,11 @@ public class OConsoleDatabaseApp extends OrientConsole implements OCommandOutput
     out.println(new StringBuilder("Backuping current database to: ").append(iText).append("..."));
 
     final String fileName = items.size() <= 0 || items.get(1).charAt(0) == '-' ? null : items.get(1);
-    // final String options = fileName != null ? iText.substring(
-    // ((String) items.get(0)).length() + ((String) items.get(1)).length() + 1).trim() : iText;
 
     int bufferSize = Integer.parseInt(properties.get("backupBufferSize"));
     int compressionLevel = Integer.parseInt(properties.get("backupCompressionLevel"));
 
-    for (int i = 1; i < items.size(); ++i) {
+    for (int i = 2; i < items.size(); ++i) {
       final String item = items.get(i);
       final int sep = item.indexOf('=');
       if (sep == -1) {

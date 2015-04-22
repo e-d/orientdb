@@ -28,6 +28,7 @@ import com.orientechnologies.common.serialization.types.OBinarySerializer;
 import com.orientechnologies.common.serialization.types.OByteSerializer;
 import com.orientechnologies.common.serialization.types.OIntegerSerializer;
 import com.orientechnologies.common.serialization.types.ONullSerializer;
+import com.orientechnologies.common.util.OCommonConst;
 import com.orientechnologies.orient.client.remote.OCollectionNetworkSerializer;
 import com.orientechnologies.orient.client.remote.OEngineRemote;
 import com.orientechnologies.orient.core.OConstants;
@@ -44,12 +45,7 @@ import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.db.record.ridbag.sbtree.OBonsaiCollectionPointer;
 import com.orientechnologies.orient.core.db.record.ridbag.sbtree.OSBTreeCollectionManager;
 import com.orientechnologies.orient.core.db.record.ridbag.sbtree.OSBTreeRidBag;
-import com.orientechnologies.orient.core.exception.OConfigurationException;
-import com.orientechnologies.orient.core.exception.ODatabaseException;
-import com.orientechnologies.orient.core.exception.OSecurityAccessException;
-import com.orientechnologies.orient.core.exception.OSecurityException;
-import com.orientechnologies.orient.core.exception.OStorageException;
-import com.orientechnologies.orient.core.exception.OTransactionAbortedException;
+import com.orientechnologies.orient.core.exception.*;
 import com.orientechnologies.orient.core.fetch.OFetchContext;
 import com.orientechnologies.orient.core.fetch.OFetchHelper;
 import com.orientechnologies.orient.core.fetch.OFetchListener;
@@ -72,11 +68,7 @@ import com.orientechnologies.orient.core.serialization.serializer.record.ORecord
 import com.orientechnologies.orient.core.serialization.serializer.record.string.ORecordSerializerSchemaAware2CSV;
 import com.orientechnologies.orient.core.serialization.serializer.record.string.ORecordSerializerStringAbstract;
 import com.orientechnologies.orient.core.serialization.serializer.stream.OStreamSerializerAnyStreamable;
-import com.orientechnologies.orient.core.storage.OCluster;
-import com.orientechnologies.orient.core.storage.OPhysicalPosition;
-import com.orientechnologies.orient.core.storage.ORecordMetadata;
-import com.orientechnologies.orient.core.storage.OStorage;
-import com.orientechnologies.orient.core.storage.OStorageProxy;
+import com.orientechnologies.orient.core.storage.*;
 import com.orientechnologies.orient.core.storage.impl.memory.ODirectMemoryStorage;
 import com.orientechnologies.orient.core.type.ODocumentWrapper;
 import com.orientechnologies.orient.core.version.ORecordVersion;
@@ -97,13 +89,8 @@ import java.io.IOException;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
 import java.net.SocketException;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.Set;
-import java.util.UUID;
 
 public class ONetworkProtocolBinary extends OBinaryNetworkProtocolAbstract {
   protected OClientConnection connection;
@@ -243,7 +230,7 @@ public class ONetworkProtocolBinary extends OBinaryNetworkProtocolAbstract {
     if (connection != null) {
       if (!Boolean.TRUE.equals(tokenBased)) {
         if (connection.database != null)
-          if (!connection.database.isClosed())
+          if (!connection.database.isClosed() && connection.database.getLocalCache() != null)
             connection.database.getLocalCache().clear();
       } else {
         if (connection.database != null && !connection.database.isClosed())
@@ -664,7 +651,7 @@ public class ONetworkProtocolBinary extends OBinaryNetworkProtocolAbstract {
             byte[] token = tokenHandler.getSignedBinaryToken(connection.database, connection.database.getUser(), connection.data);
             channel.writeBytes(token);
           } else
-            channel.writeBytes(new byte[] {});
+            channel.writeBytes(OCommonConst.EMPTY_BYTE_ARRAY);
         }
 
         sendDatabaseInformation();
@@ -701,7 +688,7 @@ public class ONetworkProtocolBinary extends OBinaryNetworkProtocolAbstract {
         if (Boolean.TRUE.equals(tokenBased)) {
           token = tokenHandler.getSignedBinaryToken(null, null, connection.data);
         } else
-          token = new byte[] {};
+          token = OCommonConst.EMPTY_BYTE_ARRAY;
         channel.writeBytes(token);
       }
 
@@ -1138,7 +1125,9 @@ public class ONetworkProtocolBinary extends OBinaryNetworkProtocolAbstract {
   protected void command() throws IOException {
     setDataCommandInfo("Execute remote command");
 
-    final boolean asynch = channel.readByte() == 'a';
+    byte type = channel.readByte();
+    final boolean live = type == 'l';
+    final boolean asynch = type == 'a';
     String dbSerializerName = connection.database.getSerializer().toString();
     String name = getRecordSerializerName();
 
@@ -1152,14 +1141,17 @@ public class ONetworkProtocolBinary extends OBinaryNetworkProtocolAbstract {
 
     connection.data.commandDetail = command.getText();
 
-    // ENABLES THE CACHE TO IMPROVE PERFORMANCE OF COMPLEX COMMANDS LIKE TRAVERSE
-    // connection.database.getLocalCache().setEnable(true);
     beginResponse();
     try {
       connection.data.command = command;
-      final OAbstractCommandResultListener listener;
+      OAbstractCommandResultListener listener = null;
 
-      if (asynch) {
+      OLiveCommandResultListener liveListener = null;
+      if (live) {
+        liveListener = new OLiveCommandResultListener(this, clientTxId, command.getResultListener());
+        listener = new OSyncCommandResultListener();
+        command.setResultListener(liveListener);
+      } else if (asynch) {
         listener = new OAsyncCommandResultListener(this, clientTxId, command.getResultListener());
         command.setResultListener(listener);
       } else
@@ -1231,7 +1223,7 @@ public class ONetworkProtocolBinary extends OBinaryNetworkProtocolAbstract {
           channel.writeString(value.toString());
         }
 
-        if (connection.data.protocolVersion >= 17) {
+        if (connection.data.protocolVersion >= 17 && listener instanceof OSyncCommandResultListener) {
           // SEND FETCHED RECORDS TO LOAD IN CLIENT CACHE
           for (ORecord rec : ((OSyncCommandResultListener) listener).getFetchedRecordsToSend()) {
             channel.writeByte((byte) 2); // CLIENT CACHE RECORD. IT
@@ -1400,13 +1392,12 @@ public class ONetworkProtocolBinary extends OBinaryNetworkProtocolAbstract {
     beginResponse();
     try {
       final ORecordMetadata metadata = connection.database.getRecordMetadata(rid);
-      if (metadata!=null) {
+      if (metadata != null) {
         sendOk(clientTxId);
         channel.writeRID(metadata.getRecordId());
         channel.writeVersion(metadata.getRecordVersion());
-      }else
-      {
-        throw new ODatabaseException(String.format("Record metadata for RID: %s, Not found",rid));
+      } else {
+        throw new ODatabaseException(String.format("Record metadata for RID: %s, Not found", rid));
       }
     } finally {
       endResponse();
@@ -1755,7 +1746,7 @@ public class ONetworkProtocolBinary extends OBinaryNetworkProtocolAbstract {
       OLogManager.instance().warn(this, "Can't serialize an exception object", e);
 
       // Write empty stream for binary compatibility
-      channel.writeBytes(new byte[0]);
+      channel.writeBytes(OCommonConst.EMPTY_BYTE_ARRAY);
     }
   }
 

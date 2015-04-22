@@ -24,15 +24,14 @@ import java.util.Iterator;
 import java.util.Map;
 
 import com.orientechnologies.common.serialization.types.OBinarySerializer;
+import com.orientechnologies.common.util.OCommonConst;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.index.*;
-import com.orientechnologies.orient.core.index.hashindex.local.OHashIndexBucket;
-import com.orientechnologies.orient.core.index.hashindex.local.OLocalHashTable;
-import com.orientechnologies.orient.core.index.hashindex.local.OMurmurHash3HashFunction;
+import com.orientechnologies.orient.core.index.hashindex.local.*;
 import com.orientechnologies.orient.core.iterator.OEmptyIterator;
 import com.orientechnologies.orient.core.record.impl.ORecordBytes;
 import com.orientechnologies.orient.core.serialization.serializer.binary.OBinarySerializerFactory;
@@ -40,24 +39,26 @@ import com.orientechnologies.orient.core.serialization.serializer.binary.impl.in
 import com.orientechnologies.orient.core.serialization.serializer.binary.impl.index.OSimpleKeySerializer;
 import com.orientechnologies.orient.core.serialization.serializer.stream.OStreamSerializer;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
-import com.orientechnologies.orient.core.storage.impl.local.paginated.base.ODurablePage;
 
 /**
  * @author Andrey Lomakin
  * @since 15.07.13
  */
 public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
+  public static final int                        VERSION                    = 2;
+
   public static final String                     METADATA_FILE_EXTENSION    = ".him";
   public static final String                     TREE_FILE_EXTENSION        = ".hit";
   public static final String                     BUCKET_FILE_EXTENSION      = ".hib";
   public static final String                     NULL_BUCKET_FILE_EXTENSION = ".hnb";
 
-  private final OLocalHashTable<Object, V>       hashTable;
+  private final OHashTable<Object, V>            hashTable;
   private final OMurmurHash3HashFunction<Object> hashFunction;
 
   private volatile ORID                          identity;
+  private int                                    version;
 
-  public OHashTableIndexEngine(Boolean durableInNonTxMode, ODurablePage.TrackMode trackMode) {
+  public OHashTableIndexEngine(Boolean durableInNonTxMode, OAbstractPaginatedStorage storage, int version) {
     hashFunction = new OMurmurHash3HashFunction<Object>();
 
     boolean durableInNonTx;
@@ -66,8 +67,13 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
     else
       durableInNonTx = durableInNonTxMode;
 
-    hashTable = new OLocalHashTable<Object, V>(METADATA_FILE_EXTENSION, TREE_FILE_EXTENSION, BUCKET_FILE_EXTENSION,
-        NULL_BUCKET_FILE_EXTENSION, hashFunction, durableInNonTx, trackMode);
+    this.version = version;
+    if (version < 2)
+      hashTable = new OLocalHashTable20<Object, V>(METADATA_FILE_EXTENSION, TREE_FILE_EXTENSION, BUCKET_FILE_EXTENSION,
+          NULL_BUCKET_FILE_EXTENSION, hashFunction, durableInNonTx, storage);
+    else
+      hashTable = new OLocalHashTable<Object, V>(METADATA_FILE_EXTENSION, TREE_FILE_EXTENSION, BUCKET_FILE_EXTENSION,
+          NULL_BUCKET_FILE_EXTENSION, hashFunction, durableInNonTx, storage);
   }
 
   @Override
@@ -94,15 +100,14 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
 
     final ODatabaseDocumentInternal database = getDatabase();
     final ORecordBytes identityRecord = new ORecordBytes();
-    final OAbstractPaginatedStorage storageLocalAbstract = (OAbstractPaginatedStorage) database.getStorage().getUnderlying();
 
     database.save(identityRecord, clusterIndexName);
     identity = identityRecord.getIdentity();
 
     hashFunction.setValueSerializer(keySerializer);
     hashTable.create(indexName, keySerializer, (OBinarySerializer<V>) valueSerializer,
-        indexDefinition != null ? indexDefinition.getTypes() : null, storageLocalAbstract, indexDefinition != null
-            && !indexDefinition.isNullValuesIgnored());
+        indexDefinition != null ? indexDefinition.getTypes() : null,
+        indexDefinition != null && !indexDefinition.isNullValuesIgnored());
   }
 
   @Override
@@ -124,9 +129,8 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
   public void load(ORID indexRid, String indexName, OIndexDefinition indexDefinition, OStreamSerializer valueSerializer,
       boolean isAutomatic) {
     identity = indexRid;
-    hashTable.load(indexName, indexDefinition != null ? indexDefinition.getTypes() : null,
-        (OAbstractPaginatedStorage) getDatabase().getStorage().getUnderlying(),
-        indexDefinition != null && !indexDefinition.isNullValuesIgnored());
+    hashTable.load(indexName, indexDefinition != null ? indexDefinition.getTypes() : null, indexDefinition != null
+        && !indexDefinition.isNullValuesIgnored());
     hashFunction.setValueSerializer(hashTable.getKeySerializer());
   }
 
@@ -189,6 +193,11 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
   }
 
   @Override
+  public int getVersion() {
+    return version;
+  }
+
+  @Override
   public boolean hasRangeQuerySupport() {
     return false;
   }
@@ -232,7 +241,7 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
       {
         OHashIndexBucket.Entry<Object, V> firstEntry = hashTable.firstEntry();
         if (firstEntry == null)
-          entries = new OHashIndexBucket.Entry[0];
+          entries = OCommonConst.EMPTY_BUCKET_ENTRY_ARRAY;
         else
           entries = hashTable.ceilingEntries(firstEntry.key);
 
@@ -315,7 +324,7 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
       {
         OHashIndexBucket.Entry<Object, V> lastEntry = hashTable.lastEntry();
         if (lastEntry == null)
-          entries = new OHashIndexBucket.Entry[0];
+          entries = OCommonConst.EMPTY_BUCKET_ENTRY_ARRAY;
         else
           entries = hashTable.floorEntries(lastEntry.key);
 
@@ -395,7 +404,7 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
       {
         OHashIndexBucket.Entry<Object, V> firstEntry = hashTable.firstEntry();
         if (firstEntry == null)
-          entries = new OHashIndexBucket.Entry[0];
+          entries = OCommonConst.EMPTY_BUCKET_ENTRY_ARRAY;
         else
           entries = hashTable.ceilingEntries(firstEntry.key);
       }

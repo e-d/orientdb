@@ -20,12 +20,17 @@
 package com.orientechnologies.orient.server.distributed.task;
 
 import com.orientechnologies.orient.core.Orient;
+import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
+import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.db.record.OPlaceholder;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
+import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.record.ORecord;
 import com.orientechnologies.orient.core.record.ORecordInternal;
+import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.record.impl.ODocumentInternal;
 import com.orientechnologies.orient.core.version.ORecordVersion;
 import com.orientechnologies.orient.server.OServer;
 import com.orientechnologies.orient.server.distributed.ODistributedRequest;
@@ -44,11 +49,12 @@ import java.io.ObjectOutput;
  *
  */
 public class OCreateRecordTask extends OAbstractRecordReplicatedTask {
-  public static final String  SUFFIX_QUEUE_NAME = ".insert";
-  private static final long   serialVersionUID  = 1L;
-  protected byte[]            content;
-  protected byte              recordType;
-  protected transient ORecord record;
+  public static final String SUFFIX_QUEUE_NAME = ".insert";
+  private static final long  serialVersionUID  = 1L;
+  protected byte[]           content;
+  protected byte             recordType;
+  protected int              clusterId         = -1;
+  private transient ORecord  record;
 
   public OCreateRecordTask() {
   }
@@ -57,6 +63,30 @@ public class OCreateRecordTask extends OAbstractRecordReplicatedTask {
     super(iRid, iVersion);
     content = iContent;
     recordType = iRecordType;
+  }
+
+  public OCreateRecordTask(final ORecord record) {
+    this((ORecordId) record.getIdentity(), record.toStream(), record.getRecordVersion(), ORecordInternal.getRecordType(record));
+
+    if (rid.getClusterId() == ORID.CLUSTER_ID_INVALID) {
+      final OClass clazz;
+      if (record instanceof ODocument && (clazz = ODocumentInternal.getImmutableSchemaClass((ODocument) record)) != null) {
+        // PRE-ASSIGN THE CLUSTER ID ON CALLER NODE
+        clusterId = clazz.getClusterSelection().getCluster(clazz, (ODocument) record);
+      } else {
+        ODatabaseDocumentInternal db = ODatabaseRecordThreadLocal.INSTANCE.get();
+        clusterId = db.getDefaultClusterId();
+      }
+    }
+  }
+
+  @Override
+  public ORecord getRecord() {
+    if (record == null) {
+      record = Orient.instance().getRecordFactoryManager().newInstance(recordType);
+      ORecordInternal.fill(record, rid, version, content, true);
+    }
+    return record;
   }
 
   @Override
@@ -71,7 +101,9 @@ public class OCreateRecordTask extends OAbstractRecordReplicatedTask {
       // OVERWRITE RID TO BE TEMPORARY
       ORecordInternal.setIdentity(record, rid.getClusterId(), ORID.CLUSTER_POS_INVALID);
 
-    if (rid.getClusterId() != -1)
+    if (clusterId > -1)
+      record.save(database.getClusterNameById(clusterId), true);
+    else if (rid.getClusterId() != -1)
       record.save(database.getClusterNameById(rid.getClusterId()), true);
     else
       record.save();
@@ -91,7 +123,8 @@ public class OCreateRecordTask extends OAbstractRecordReplicatedTask {
   }
 
   @Override
-  public ODeleteRecordTask getFixTask(final ODistributedRequest iRequest, final Object iBadResponse, final Object iGoodResponse) {
+  public ODeleteRecordTask getFixTask(final ODistributedRequest iRequest, OAbstractRemoteTask iOriginalTask,
+      final Object iBadResponse, final Object iGoodResponse) {
     if (iBadResponse instanceof Throwable)
       return null;
 
@@ -118,6 +151,7 @@ public class OCreateRecordTask extends OAbstractRecordReplicatedTask {
       out.write(content);
     }
     out.write(recordType);
+    out.writeInt(clusterId);
   }
 
   @Override
@@ -131,6 +165,7 @@ public class OCreateRecordTask extends OAbstractRecordReplicatedTask {
       in.readFully(content);
     }
     recordType = in.readByte();
+    clusterId = in.readInt();
   }
 
   // @Override
@@ -141,13 +176,5 @@ public class OCreateRecordTask extends OAbstractRecordReplicatedTask {
   @Override
   public String getName() {
     return "record_create";
-  }
-
-  public ORecord getRecord() {
-    if (record == null) {
-      record = Orient.instance().getRecordFactoryManager().newInstance(recordType);
-      ORecordInternal.fill(record, rid, version, content, true);
-    }
-    return record;
   }
 }

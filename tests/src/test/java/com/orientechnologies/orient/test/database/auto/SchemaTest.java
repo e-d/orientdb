@@ -93,6 +93,63 @@ public class SchemaTest extends DocumentDBBaseTest {
   }
 
   @Test(dependsOnMethods = "checkSchema")
+  public void checkInvalidNames() {
+
+    database = new ODatabaseDocumentTx(url);
+    database.open("admin", "admin");
+
+    OSchema schema = database.getMetadata().getSchema();
+
+    try {
+      schema.createClass("TestInvalidName:");
+      Assert.assertTrue(false);
+    } catch (OSchemaException e) {
+    }
+
+    try {
+      schema.createClass("TestInvalidName,");
+      Assert.assertTrue(false);
+    } catch (OSchemaException e) {
+    }
+
+    try {
+      schema.createClass("TestInvalidName;");
+      Assert.assertTrue(false);
+    } catch (OSchemaException e) {
+    }
+
+    try {
+      schema.createClass("TestInvalid Name");
+      Assert.assertTrue(false);
+    } catch (OSchemaException e) {
+    }
+
+    try {
+      schema.createClass("TestInvalid%Name:");
+      Assert.assertTrue(false);
+    } catch (OSchemaException e) {
+    }
+
+    try {
+      schema.createClass("TestInvalid@Name:");
+      Assert.assertTrue(false);
+    } catch (OSchemaException e) {
+    }
+
+    try {
+      schema.createClass("TestInvalid=Name:");
+      Assert.assertTrue(false);
+    } catch (OSchemaException e) {
+    }
+
+    try {
+      schema.createClass("TestInvalid.Name");
+      Assert.assertTrue(false);
+    } catch (OSchemaException e) {
+    }
+  }
+
+  @Test(dependsOnMethods = "checkSchema")
   public void checkSchemaApi() {
     database = new ODatabaseDocumentTx(url);
     database.open("admin", "admin");
@@ -309,7 +366,7 @@ public class SchemaTest extends DocumentDBBaseTest {
 
     Assert.assertNotNull(superClass);
     boolean found = false;
-    for (OClass c : superClass.getBaseClasses()) {
+    for (OClass c : superClass.getSubclasses()) {
       if (c.equals(company)) {
         found = true;
         break;
@@ -319,7 +376,7 @@ public class SchemaTest extends DocumentDBBaseTest {
 
     company.setSuperClass(null);
     Assert.assertNull(company.getSuperClass());
-    for (OClass c : superClass.getBaseClasses()) {
+    for (OClass c : superClass.getSubclasses()) {
       Assert.assertNotSame(c, company);
     }
 
@@ -331,7 +388,7 @@ public class SchemaTest extends DocumentDBBaseTest {
 
     Assert.assertNotNull(company.getSuperClass());
     found = false;
-    for (OClass c : superClass.getBaseClasses()) {
+    for (OClass c : superClass.getSubclasses()) {
       if (c.equals(company)) {
         found = true;
         break;
@@ -607,7 +664,6 @@ public class SchemaTest extends DocumentDBBaseTest {
       Assert.assertTrue(e instanceof OSchemaException);
     }
   }
-
 
   public void testWrongClassNameWithPercent() {
     try {

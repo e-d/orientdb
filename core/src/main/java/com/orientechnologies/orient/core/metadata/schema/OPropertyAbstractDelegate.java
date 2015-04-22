@@ -143,6 +143,17 @@ public class OPropertyAbstractDelegate implements OProperty {
   }
 
   @Override
+  public String getDefaultValue() {
+    return delegate.getDefaultValue();
+  }
+
+  @Override
+  public OProperty setDefaultValue(final String defaultValue) {
+    delegate.setDefaultValue(defaultValue);
+    return this;
+  }
+
+  @Override
   public OIndex<?> createIndex(final OClass.INDEX_TYPE iType) {
     return delegate.createIndex(iType);
   }
@@ -154,20 +165,20 @@ public class OPropertyAbstractDelegate implements OProperty {
 
   @Override
   public OProperty setLinkedClass(OClass oClass) {
-	delegate.setLinkedClass(oClass);
-	return this;
+    delegate.setLinkedClass(oClass);
+    return this;
   }
 
   @Override
   public OProperty setLinkedType(OType type) {
-	delegate.setLinkedType(type);
-	return this;
+    delegate.setLinkedType(type);
+    return this;
   }
 
   @Override
   public OProperty setCollate(OCollate collate) {
-	delegate.setCollate(collate);
-	return this;
+    delegate.setCollate(collate);
+    return this;
   }
 
   @Override

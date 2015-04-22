@@ -95,11 +95,8 @@ public enum OGlobalConfiguration {
   DISK_WRITE_CACHE_FLUSH_LOCK_TIMEOUT("storage.diskCache.writeCacheFlushLockTimeout",
       "Maximum amount of time till write cache will be wait before page flush in ms.", Integer.class, -1),
 
-  DISK_CACHE_FREE_SPACE_LIMIT(
-      "storage.diskCache.diskFreeSpaceLimit",
-      "Minimum amount of space on disk after which database will "
-          + "work only in read mode, in megabytes. You need free space on disk which is sum of this parameter and maximum size of WAL on disk.",
-      Long.class, 100),
+  DISK_CACHE_FREE_SPACE_LIMIT("storage.diskCache.diskFreeSpaceLimit", "Minimum amount of space on disk after which database will "
+      + "work only in read mode, in megabytes", Long.class, 100),
 
   DISC_CACHE_FREE_SPACE_CHECK_INTERVAL("storage.diskCache.diskFreeSpaceCheckInterval",
       "Interval, in seconds, after which storage periodically "
@@ -121,9 +118,8 @@ public enum OGlobalConfiguration {
 
   WAL_MAX_SEGMENT_SIZE("storage.wal.maxSegmentSize", "Maximum size of single. WAL segment in megabytes.", Integer.class, 128),
 
-  WAL_MAX_SIZE("storage.wal.maxSize", "Supposed, maximum size of WAL on disk in megabytes. This size may be more or less. "
-      + "This parameter is used to calculate required free disk space, if we will have less free"
-      + " disk space then required database will work in read only mode.", Integer.class, 4 * 1024),
+  WAL_MAX_SIZE("storage.wal.maxSize", "Supposed, maximum size of WAL on disk in megabytes. This size may be more or less. ",
+      Integer.class, 4096),
 
   WAL_COMMIT_TIMEOUT("storage.wal.commitTimeout", "Maximum interval between WAL commits (in ms.)", Integer.class, 1000),
 
@@ -294,7 +290,7 @@ public enum OGlobalConfiguration {
   PREFER_SBTREE_SET("collections.preferSBTreeSet", "This config is experimental.", Boolean.class, false),
 
   // FILE
-  FILE_LOCK("file.lock", "Locks files when used. Default is false", boolean.class, true),
+  FILE_LOCK("file.lock", "Locks files when used. Default is true", boolean.class, true),
 
   FILE_DELETE_DELAY("file.deleteDelay", "Delay time in ms to wait for another attempt to delete a locked file", Integer.class, 10),
 
@@ -442,10 +438,10 @@ public enum OGlobalConfiguration {
 
   // DISTRIBUTED
   DISTRIBUTED_CRUD_TASK_SYNCH_TIMEOUT("distributed.crudTaskTimeout",
-      "Maximum timeout in milliseconds to wait for CRUD remote tasks", Integer.class, 3000l),
+      "Maximum timeout in milliseconds to wait for CRUD remote tasks", Integer.class, 3000),
 
   DISTRIBUTED_COMMAND_TASK_SYNCH_TIMEOUT("distributed.commandTaskTimeout",
-      "Maximum timeout in milliseconds to wait for Command remote tasks", Integer.class, 60000l),
+      "Maximum timeout in milliseconds to wait for Command remote tasks", Integer.class, 60000),
 
   DISTRIBUTED_DEPLOYDB_TASK_SYNCH_TIMEOUT("distributed.deployDbTaskTimeout",
       "Maximum timeout in milliseconds to wait for database deployment", Long.class, 1200000l),
@@ -459,11 +455,20 @@ public enum OGlobalConfiguration {
   DISTRIBUTED_QUEUE_TIMEOUT("distributed.queueTimeout", "Maximum timeout in milliseconds to wait for the response in replication",
       Integer.class, 5000l),
 
+  DISTRIBUTED_ASYNCH_QUEUE_SIZE("distributed.asynchQueueSize",
+      "Queue size to handle distributed asynchronous operations. 0 = dynamic allocation (up to 2^31-1 entries)", Integer.class, 0),
+
   DISTRIBUTED_ASYNCH_RESPONSES_TIMEOUT("distributed.asynchResponsesTimeout",
-      "Maximum timeout in milliseconds to collect all the asynchronous responses from replication", Integer.class, 15000l),
+      "Maximum timeout in milliseconds to collect all the asynchronous responses from replication", Integer.class, 15000),
 
   DISTRIBUTED_PURGE_RESPONSES_TIMER_DELAY("distributed.purgeResponsesTimerDelay",
-      "Maximum timeout in milliseconds to collect all the asynchronous responses from replication", Integer.class, 15000l),
+      "Maximum timeout in milliseconds to collect all the asynchronous responses from replication", Integer.class, 15000),
+
+  DB_MAKE_FULL_CHECKPOINT_ON_INDEX_CHANGE("db.makeFullCheckpointOnIndexChange",
+      "When index metadata is changed full checkpoint is performed", Boolean.class, true),
+
+  DB_MAKE_FULL_CHECKPOINT_ON_SCHEMA_CHANGE("db.makeFullCheckpointOnSchemaChange",
+      "When index schema is changed full checkpoint is performed", Boolean.class, true),
 
   DB_DOCUMENT_SERIALIZER("db.document.serializer", "The default record serializer used by the document database", String.class,
       ORecordSerializerBinary.NAME),
@@ -529,20 +534,19 @@ public enum OGlobalConfiguration {
 
   @Deprecated
   TX_AUTO_RETRY("tx.autoRetry",
-                 "Maximum number of automatic retry if some resource has been locked in the middle of the transaction (Timeout exception)",
-                 Integer.class, 1),
+      "Maximum number of automatic retry if some resource has been locked in the middle of the transaction (Timeout exception)",
+      Integer.class, 1),
 
   @Deprecated
   TX_LOG_TYPE("tx.log.fileType", "File type to handle transaction logs: mmap or classic", String.class, "classic"),
 
   @Deprecated
   TX_LOG_SYNCH(
-                "tx.log.synch",
-                "Executes a synch against the file-system at every log entry. This slows down transactions but guarantee transaction reliability on unreliable drives",
-                Boolean.class, Boolean.FALSE),
-  @Deprecated
+      "tx.log.synch",
+      "Executes a synch against the file-system at every log entry. This slows down transactions but guarantee transaction reliability on unreliable drives",
+      Boolean.class, Boolean.FALSE), @Deprecated
   TX_USE_LOG("tx.useLog", "Transactions use log file to store temporary data to be rolled back in case of crash", Boolean.class,
-              true),
+      true),
 
   @Deprecated
   INDEX_AUTO_REBUILD_AFTER_NOTSOFTCLOSE("index.auto.rebuildAfterNotSoftClose",
@@ -666,15 +670,6 @@ public enum OGlobalConfiguration {
         // INCREASE WAL RESTORE BATCH SIZE TO 10K INSTEAD OF DEFAULT 1K
         WAL_RESTORE_BATCH_SIZE.setValue(10000);
     }
-
-    if (System.getProperty(WAL_MAX_SIZE.key) == null) {
-      long walSize = DISK_CACHE_SIZE.getValueAsInteger() * 4;
-
-      if (walSize > freeSpaceInMB / 2)
-        walSize = freeSpaceInMB / 2;
-
-      WAL_MAX_SIZE.setValue(walSize);
-    }
   }
 
   private static void autoConfigDiskCacheSize(final long freeSpaceInMB) {
@@ -702,7 +697,10 @@ public enum OGlobalConfiguration {
         // LOW MEMORY: SET IT TO 256MB ONLY
         OLogManager
             .instance()
-            .warn(null, "No enough physical memory available for DISKCACHE: %,dMB (heap=%,dMB). Set lower Maximum Heap (-Xmx setting on JVM) and restart OrientDB. Now running with DISKCACHE=" + OReadWriteDiskCache.MIN_CACHE_SIZE + "MB", osMemory / 1024 / 1024, jvmMaxMemory / 1024 / 1024);
+            .warn(
+                null,
+                "Not enough physical memory available for DISKCACHE: %,dMB (heap=%,dMB). Set lower Maximum Heap (-Xmx setting on JVM) and restart OrientDB. Now running with DISKCACHE="
+                    + OReadWriteDiskCache.MIN_CACHE_SIZE + "MB", osMemory / 1024 / 1024, jvmMaxMemory / 1024 / 1024);
         DISK_CACHE_SIZE.setValue(OReadWriteDiskCache.MIN_CACHE_SIZE);
       }
 

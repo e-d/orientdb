@@ -19,6 +19,17 @@
   */
 package com.orientechnologies.orient.core.metadata.schema;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Callable;
+
 import com.orientechnologies.common.concur.lock.OReadersWriterSpinLock;
 import com.orientechnologies.common.concur.resource.OCloseable;
 import com.orientechnologies.common.log.OLogManager;
@@ -52,17 +63,6 @@ import com.orientechnologies.orient.core.storage.OStorageProxy;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
 import com.orientechnologies.orient.core.type.ODocumentWrapper;
 import com.orientechnologies.orient.core.type.ODocumentWrapperNoClass;
-
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
 /**
  * Shared schema class. It's shared by all the database instances that point to the same storage.
  * 
@@ -96,6 +96,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
   private final Map<String, OGlobalProperty>    propertiesByNameType    = new HashMap<String, OGlobalProperty>();
   private volatile int                          version                 = 0;
   private volatile boolean                      fullCheckpointOnChange  = false;
+  private volatile OImmutableSchema             snapshot;
 
   private static final class ClusterIdsAreEmptyException extends Exception {
   }
@@ -118,7 +119,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
 
     for (int i = 0; i < nameSize; ++i) {
       final char c = iName.charAt(i);
-      if (c == ':' || c == ',' || c == ';' || c == ' ' || c == '%' || c == '@' || c == '=')
+      if (c == ':' || c == ',' || c == ';' || c == ' ' || c == '%' || c == '@' || c == '=' || c == '.')
         // INVALID CHARACTER
         return c;
     }
@@ -157,12 +158,18 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
 
   @Override
   public OImmutableSchema makeSnapshot() {
+    if (snapshot == null) {
+      // Is null only in the case that is asked while the schema is created
+      // all the other cases are already protected by a write lock
     acquireSchemaReadLock();
     try {
-      return new OImmutableSchema(this);
+        if (snapshot == null)
+          snapshot = new OImmutableSchema(this);
     } finally {
       releaseSchemaReadLock();
     }
+  }
+    return snapshot;
   }
 
   public boolean isClustersCanNotBeSharedAmongClasses() {
@@ -194,6 +201,8 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       try {
     acquireSchemaWriteLock();
     try {
+        	//TODO: revisit this logic: interfaces should be also taken into concederation
+        	//TODO: Remove code duplication of this kind!
       final Class<?> superClass = clazz.getSuperclass();
       final OClass cls;
       if (superClass != null && superClass != Object.class && existsClass(superClass.getSimpleName()))
@@ -201,7 +210,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       else
         cls = null;
 
-          result = doCreateClass(clazz.getSimpleName(), cls, clusterIds, retry);
+          result = doCreateClass(clazz.getSimpleName(), clusterIds, retry, cls);
           break;
     } finally {
       releaseSchemaWriteLock();
@@ -215,6 +224,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
     return result;
   }
 
+  @Override
   public OClass createClass(final Class<?> clazz, final int iDefaultClusterId) {
     OClass result;
 
@@ -225,6 +235,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       try {
     acquireSchemaWriteLock();
     try {
+        	//TODO: revisit this logic: interfaces should be also taken into concederation
       final Class<?> superClass = clazz.getSuperclass();
       final OClass cls;
       if (superClass != null && superClass != Object.class && existsClass(superClass.getSimpleName()))
@@ -232,7 +243,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       else
         cls = null;
 
-          result = doCreateClass(clazz.getSimpleName(), cls, clusterIds, retry);
+          result = doCreateClass(clazz.getSimpleName(), clusterIds, retry, cls);
     } finally {
       releaseSchemaWriteLock();
     }
@@ -246,27 +257,43 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
     return result;
   }
 
+  @Override
   public OClass createClass(final String className) {
     return createClass(className, (OClass) null, (int[]) null);
   }
 
+  @Override
   public OClass createClass(final String iClassName, final OClass iSuperClass) {
     return createClass(iClassName, iSuperClass, (int[]) null);
   }
 
+  @Override
+	public OClass createClass(String iClassName, OClass... superClasses) {
+		return createClass(iClassName, (int[])null, superClasses);
+	}
+
+  @Override
   public OClass createClass(final String className, final int iDefaultClusterId) {
-    return createClass(className, null, new int[] { iDefaultClusterId });
+    return createClass(className, (OClass)null, new int[] { iDefaultClusterId });
   }
 
+  @Override
   public OClass createClass(final String className, final OClass iSuperClass, final int iDefaultClusterId) {
     return createClass(className, iSuperClass, new int[] { iDefaultClusterId });
   }
 
+  @Override
   public OClass getOrCreateClass(final String iClassName) {
-    return getOrCreateClass(iClassName, null);
+    return getOrCreateClass(iClassName, (OClass)null);
   }
 
+  @Override
   public OClass getOrCreateClass(final String iClassName, final OClass superClass) {
+	return getOrCreateClass(iClassName, superClass==null?new OClass[0]:new OClass[]{superClass});  
+  }
+
+  @Override
+  public OClass getOrCreateClass(final String iClassName, final OClass... superClasses) {
     if (iClassName == null)
       return null;
 
@@ -292,9 +319,10 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       if (cls != null)
         return cls;
 
-          cls = doCreateClass(iClassName, superClass, clusterIds, retry);
-      if (superClass != null && !cls.isSubClassOf(superClass))
-            throw new IllegalArgumentException("Class '" + iClassName + "' is not an instance of " + superClass.getShortName());
+          cls = doCreateClass(iClassName, clusterIds, retry, superClasses);
+          //TODO: revisit this exception
+//          if (superClass != null && !cls.isSubClassOf(superClass))
+//            throw new IllegalArgumentException("Class '" + iClassName + "' is not an instance of " + superClass.getShortName());
 
       addClusterClassMap(cls);
     } finally {
@@ -319,13 +347,13 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       try {
     acquireSchemaWriteLock();
     try {
+        	//TODO: revisit this logic: interfaces should be also taken into concederation
       final Class<?> superClass = iClass.getSuperclass();
       if (superClass != null && superClass != Object.class && existsClass(superClass.getSimpleName()))
         cls = getClass(superClass.getSimpleName());
       else
         cls = null;
-
-          cls = doCreateClass(iClass.getSimpleName(), cls, clusterIds, retry);
+          cls = doCreateClass(iClass.getSimpleName(), clusterIds, retry, cls);
     } finally {
       releaseSchemaWriteLock();
     }
@@ -349,17 +377,29 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
     return createClass(className, superClass, -1);
   }
 
+  @Override
+	public OClass createAbstractClass(String iClassName, OClass... superClasses) {
+		return createClass(iClassName, new int[]{-1}, superClasses);
+	}
+  
+  @Override
   public OClass createClass(final String className, final OClass superClass, int[] clusterIds) {
+	  return createClass(className, clusterIds, superClass);
+  }
+  
+  @Override
+  public OClass createClass(final String className, int[] clusterIds, OClass... superClasses) {
     final Character wrongCharacter = OSchemaShared.checkClassNameIfValid(className);
     if (wrongCharacter != null)
-      throw new OSchemaException("Invalid class name found. Character '" + wrongCharacter + "' cannot be used in class name");
+      throw new OSchemaException("Invalid class name found. Character '" + wrongCharacter + "' cannot be used in class name '"
+          + className + "'");
 
     OClass result;
     int retry = 0;
 
     while (true)
     try {
-        result = doCreateClass(className, superClass, clusterIds, retry);
+        result = doCreateClass(className, clusterIds, retry, superClasses);
         break;
       } catch (ClusterIdsAreEmptyException e) {
         classes.remove(className.toLowerCase());
@@ -473,7 +513,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       if (cls == null)
         throw new OSchemaException("Class " + className + " was not found in current database");
 
-      if (!cls.getBaseClasses().isEmpty())
+      if (!cls.getSubclasses().isEmpty())
         throw new OSchemaException("Class " + className
             + " cannot be dropped because it has sub classes. Remove the dependencies before trying to drop it again");
 
@@ -508,7 +548,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
     rwSpinLock.acquireWriteLock();
     try {
       reload(null);
-
+      snapshot = new OImmutableSchema(this);
       return (RET) this;
     } finally {
       rwSpinLock.releaseWriteLock();
@@ -584,6 +624,8 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
           saveInternal();
         else
           reload();
+        else
+          snapshot = new OImmutableSchema(this);
 
         version++;
       }
@@ -681,23 +723,33 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       classes.putAll(newClasses);
 
       // REBUILD THE INHERITANCE TREE
-      String superClassName;
+      List<String> superClassNames;
+      String legacySuperClassName;
+      List<OClass> superClasses;
       OClass superClass;
+      
       for (ODocument c : storedClasses) {
-        superClassName = c.field("superClass");
+    	  superClassNames = c.field("superClasses");
+    	  legacySuperClassName = c.field("superClass");
+    	  if(superClassNames==null) superClassNames = new ArrayList<String>();
+    	  if(legacySuperClassName!=null && !superClassNames.contains(legacySuperClassName)) superClassNames.add(legacySuperClassName);
 
-        if (superClassName != null) {
-          // HAS A SUPER CLASS
+        if (!superClassNames.isEmpty()) {
+          // HAS A SUPER CLASS or CLASSES
           cls = (OClassImpl) classes.get(((String) c.field("name")).toLowerCase());
+        	superClasses = new ArrayList<OClass>(superClassNames.size());
+        	for(String superClassName:superClassNames)
+        	{
 
           superClass = classes.get(superClassName.toLowerCase());
 
           if (superClass == null)
             throw new OConfigurationException("Super class '" + superClassName + "' was declared in class '" + cls.getName()
                 + "' but was not found in schema. Remove the dependency or create the class to continue.");
-
-          cls.setSuperClassInternal(superClass);
+	          superClasses.add(superClass);
         }
+        	cls.setSuperClassesInternal(superClasses);
+      }
       }
 
       if (!hasGlobalProperties) {
@@ -784,6 +836,8 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       ((ORecordId) document.getIdentity()).fromString(getDatabase().getStorage().getConfiguration().schemaRecordId);
       reload("*:-1 index:0");
 
+      snapshot = new OImmutableSchema(this);
+
       return this;
     } finally {
       rwSpinLock.releaseWriteLock();
@@ -797,6 +851,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       super.save(OMetadataDefault.CLUSTER_INTERNAL_NAME);
       db.getStorage().getConfiguration().schemaRecordId = document.getIdentity().toString();
       db.getStorage().getConfiguration().update();
+      snapshot = new OImmutableSchema(this);
     } finally {
       rwSpinLock.releaseWriteLock();
     }
@@ -888,7 +943,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
     return global;
   }
 
-  private OClass doCreateClass(final String className, final OClass superClass, final int[] clusterIds, int retry)
+  private OClass doCreateClass(final String className, final int[] clusterIds, int retry, OClass... superClasses)
       throws ClusterIdsAreEmptyException {
     OClass result;
 
@@ -910,9 +965,21 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       cmd = new StringBuilder("create class ");
       cmd.append(className);
 
-      if (superClass != null) {
-        cmd.append(" extends ");
+      List<OClass> superClassesList = new ArrayList<OClass>();
+      if (superClasses != null && superClasses.length>0) {
+        boolean first=true;
+        for(OClass superClass: superClasses)
+        {
+        	//Filtering for null
+        	if(superClass!=null)
+        	{
+        		if(first) cmd.append(" extends ");
+        		else cmd.append(", ");
         cmd.append(superClass.getName());
+        		first = false;
+        		superClassesList.add(superClass);
+      }
+        }
       }
 
       if (clusterIds != null) {
@@ -932,7 +999,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       }
 
       if (isDistributedCommand()) {
-        createClassInternal(className, superClass, clusterIds);
+        createClassInternal(className, clusterIds, superClassesList);
 
         final OAutoshardedStorage autoshardedStorage = (OAutoshardedStorage) storage;
         OCommandSQL commandSQL = new OCommandSQL(cmd.toString());
@@ -944,7 +1011,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
         db.command(new OCommandSQL(cmd.toString())).execute();
         reload();
       } else
-        createClassInternal(className, superClass, clusterIds);
+        createClassInternal(className, clusterIds, superClassesList);
 
       result = classes.get(className.toLowerCase());
 
@@ -964,7 +1031,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
         && OScenarioThreadLocal.INSTANCE.get() != OScenarioThreadLocal.RUN_MODE.RUNNING_DISTRIBUTED;
   }
 
-  private OClass createClassInternal(final String className, final OClass superClass, final int[] clusterIdsToAdd)
+  private OClass createClassInternal(final String className, final int[] clusterIdsToAdd, final List<OClass> superClasses)
       throws ClusterIdsAreEmptyException {
     acquireSchemaWriteLock();
     try {
@@ -1005,9 +1072,10 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
         // BIND SHORT NAME TOO
         classes.put(cls.getShortName().toLowerCase(), cls);
 
-      if (superClass != null) {
-        cls.setSuperClassInternal(superClass);
-
+      if (superClasses != null && superClasses.size()>0) {
+        cls.setSuperClassesInternal(superClasses);
+        for(OClass superClass: superClasses)
+        {
         // UPDATE INDEXES
         final int[] clustersToIndex = superClass.getPolymorphicClusterIds();
         final String[] clusterNames = new String[clustersToIndex.length];
@@ -1018,6 +1086,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
           for (String clusterName : clusterNames)
             if (clusterName != null)
               database.getMetadata().getIndexManager().addClusterToIndex(clusterName, index.getName());
+      }
       }
 
       addClusterClassMap(cls);
@@ -1068,15 +1137,17 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
       if (cls == null)
         throw new OSchemaException("Class " + className + " was not found in current database");
 
-      if (!cls.getBaseClasses().isEmpty())
+      if (!cls.getSubclasses().isEmpty())
         throw new OSchemaException("Class " + className
             + " cannot be dropped because it has sub classes. Remove the dependencies before trying to drop it again");
 
       checkEmbedded(getDatabase().getStorage());
 
-      if (cls.getSuperClass() != null)
+      for(OClass superClass: cls.getSuperClasses())
+      {
         // REMOVE DEPENDENCY FROM SUPERCLASS
-        ((OClassImpl) cls.getSuperClass()).removeBaseClassInternal(cls);
+    	  ((OClassImpl) superClass).removeBaseClassInternal(cls);
+      }
 
       dropClassIndexes(cls);
 
@@ -1113,14 +1184,23 @@ public class OSchemaShared extends ODocumentWrapperNoClass implements OSchema, O
 
     setDirty();
 
+    OScenarioThreadLocal.executeAsDistributed(new Callable<Object>() {
+      @Override
+      public Object call() {
     try {
-      super.save(OMetadataDefault.CLUSTER_INTERNAL_NAME);
+          toStream();
+          document.save(OMetadataDefault.CLUSTER_INTERNAL_NAME);
       if (fullCheckpointOnChange)
         getDatabase().getStorage().synch();
     } catch (OConcurrentModificationException e) {
       reload(null, true);
       throw e;
     }
+        return null;
+  }
+    });
+
+    snapshot = new OImmutableSchema(this);
   }
 
   private void addClusterClassMap(final OClass cls) {

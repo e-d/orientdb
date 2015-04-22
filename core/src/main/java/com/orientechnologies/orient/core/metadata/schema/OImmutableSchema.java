@@ -56,6 +56,10 @@ public class OImmutableSchema implements OSchema {
     properties = new ArrayList<OGlobalProperty>();
     for (OGlobalProperty globalProperty : schemaShared.getGlobalProperties())
       properties.add(globalProperty);
+
+    for (OClass cl : classes.values()) {
+      ((OImmutableClass) cl).init();
+    }
   }
 
   @Override
@@ -87,6 +91,11 @@ public class OImmutableSchema implements OSchema {
   public OClass createClass(String iClassName, OClass iSuperClass) {
     throw new UnsupportedOperationException();
   }
+  
+  @Override
+  public OClass createClass(String iClassName, OClass... superClasses) {
+    throw new UnsupportedOperationException();
+  }
 
   @Override
   public OClass createClass(String iClassName, int iDefaultClusterId) {
@@ -102,6 +111,12 @@ public class OImmutableSchema implements OSchema {
   public OClass createClass(String iClassName, OClass iSuperClass, int[] iClusterIds) {
     throw new UnsupportedOperationException();
   }
+  
+  @Override
+	public OClass createClass(String className, int[] clusterIds,
+			OClass... superClasses) {
+	  throw new UnsupportedOperationException();
+	}
 
   @Override
   public OClass createAbstractClass(Class<?> iClass) {
@@ -117,6 +132,11 @@ public class OImmutableSchema implements OSchema {
   public OClass createAbstractClass(String iClassName, OClass iSuperClass) {
     throw new UnsupportedOperationException();
   }
+  
+  @Override
+	public OClass createAbstractClass(String iClassName, OClass... superClasses) {
+	  throw new UnsupportedOperationException();
+	}
 
   @Override
   public void dropClass(String iClassName) {
@@ -162,6 +182,11 @@ public class OImmutableSchema implements OSchema {
   public OClass getOrCreateClass(String iClassName, OClass iSuperClass) {
     throw new UnsupportedOperationException();
   }
+  
+  @Override
+	public OClass getOrCreateClass(String iClassName, OClass... superClasses) {
+	  throw new UnsupportedOperationException();
+	}
 
   @Override
   public Collection<OClass> getClasses() {

@@ -19,20 +19,6 @@
  */
 package com.orientechnologies.orient.server;
 
-import java.io.IOException;
-import java.net.Socket;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map.Entry;
-import java.util.Set;
-import java.util.TimerTask;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicInteger;
-
 import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.common.profiler.OAbstractProfiler.OProfilerHookValue;
 import com.orientechnologies.common.profiler.OProfilerMBean.METRIC_TYPE;
@@ -46,6 +32,20 @@ import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinary;
 import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinaryProtocol;
 import com.orientechnologies.orient.server.network.protocol.ONetworkProtocol;
 import com.orientechnologies.orient.server.network.protocol.binary.ONetworkProtocolBinary;
+
+import java.io.IOException;
+import java.net.Socket;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map.Entry;
+import java.util.Set;
+import java.util.TimerTask;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class OClientConnectionManager {
   private static final OClientConnectionManager       instance         = new OClientConnectionManager();
@@ -76,6 +76,10 @@ public class OClientConnectionManager {
             });
   }
 
+  public static OClientConnectionManager instance() {
+    return instance;
+  }
+
   public void cleanExpiredConnections() {
     final Iterator<Entry<Integer, OClientConnection>> iterator = connections.entrySet().iterator();
     while (iterator.hasNext()) {
@@ -104,10 +108,6 @@ public class OClientConnectionManager {
         iterator.remove();
       }
     }
-  }
-
-  public static OClientConnectionManager instance() {
-    return instance;
   }
 
   /**
@@ -293,13 +293,16 @@ public class OClientConnectionManager {
         continue;
       }
 
-      if (!(c.protocol instanceof ONetworkProtocolBinary))
-        // INVOLVE ONLY BINAR PROTOCOLS
+      if (!(c.protocol instanceof ONetworkProtocolBinary) || c.data.serializationImpl == null)
+        // INVOLVE ONLY BINARY PROTOCOLS
         continue;
 
       final ONetworkProtocolBinary p = (ONetworkProtocolBinary) c.protocol;
       final OChannelBinary channel = (OChannelBinary) p.getChannel();
-      ORecordSerializer ser = ORecordSerializerFactory.instance().getFormat(c.data.serializationImpl);
+      final ORecordSerializer ser = ORecordSerializerFactory.instance().getFormat(c.data.serializationImpl);
+      if (ser == null)
+        return;
+
       final byte[] content = ser.toStream(iConfig, false);
 
       try {
@@ -332,6 +335,7 @@ public class OClientConnectionManager {
     while (iterator.hasNext()) {
       final Entry<Integer, OClientConnection> entry = iterator.next();
       entry.getValue().protocol.sendShutdown();
+
       OCommandRequestText command = entry.getValue().data.command;
       if (command != null && command.isIdempotent()) {
         entry.getValue().protocol.interrupt();
@@ -357,8 +361,19 @@ public class OClientConnectionManager {
                   entry.getValue().getRemoteAddress());
             }
           }
-          if (entry.getValue().protocol.isAlive())
+          if (entry.getValue().protocol.isAlive()) {
+            if (entry.getValue().protocol instanceof ONetworkProtocolBinary
+                && ((ONetworkProtocolBinary) entry.getValue().protocol).getRequestType() == -1) {
+              try {
+                entry.getValue().protocol.getChannel().close();
+              } catch (Exception e) {
+                OLogManager.instance().error(this, "Error during chanel close at shutdown", e);
+              }
+              entry.getValue().protocol.interrupt();
+            }
+
             entry.getValue().protocol.join();
+          }
         } catch (InterruptedException e) {
           // NOT Needed to handle
         }

@@ -19,6 +19,7 @@
  */
 package com.orientechnologies.orient.core.id;
 
+import com.orientechnologies.common.util.OPatternConst;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
@@ -95,6 +96,10 @@ public class ORecordId implements ORID {
 
   public static boolean isTemporary(final long clusterPosition) {
     return clusterPosition < CLUSTER_POS_INVALID;
+  }
+
+  public static boolean isA(final String iString) {
+    return OPatternConst.PATTERN_RID.matcher(iString).matches();
   }
 
   public void reset() {
@@ -276,6 +281,11 @@ public class ORecordId implements ORID {
   public void lock(final boolean iExclusive) {
     ODatabaseRecordThreadLocal.INSTANCE.get().getTransaction()
         .lockRecord(this, iExclusive ? OStorage.LOCKING_STRATEGY.KEEP_EXCLUSIVE_LOCK : OStorage.LOCKING_STRATEGY.KEEP_SHARED_LOCK);
+  }
+
+  @Override
+  public boolean isLocked() {
+    return ODatabaseRecordThreadLocal.INSTANCE.get().getTransaction().isLockedRecord(this);
   }
 
   @Override

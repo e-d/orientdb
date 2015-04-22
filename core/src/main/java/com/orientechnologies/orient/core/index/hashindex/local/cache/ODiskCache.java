@@ -20,18 +20,17 @@
 package com.orientechnologies.orient.core.index.hashindex.local.cache;
 
 import com.orientechnologies.orient.core.command.OCommandOutputListener;
-import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.ODirtyPage;
+import com.orientechnologies.orient.core.storage.impl.local.OLowDiskSpaceListener;
 
 import java.io.IOException;
-import java.util.Set;
 
 /**
  * This class is heart of OrientDB storage model it presents disk backed data cache which works with direct memory.
  * 
  * Model of this cache is based on page model. All direct memory area is mapped to disk files and each file is split on pages. Page
- * is smallest unit of work. Amount of RAM which can be used for data manipulation is limited so only subset of data will be really
- * loaded into RAM on demand, if there is no enough amount of RAM to store all data, part of them will by flushed to the disk. If
- * disk cache is closed all changes will be flushed to the disk.
+ * is smallest unit of work. The amount of RAM which can be used for data manipulation is limited so only a subset of data will be
+ * really loaded into RAM on demand, if there is not enough RAM to store all data, part of them will by flushed to the disk. If disk
+ * cache is closed all changes will be flushed to the disk.
  * 
  * Typical steps if you work with disk cache are following:
  * <ol>
@@ -64,17 +63,21 @@ import java.util.Set;
  * @since 14.03.13
  */
 public interface ODiskCache {
+  long addFile(String fileName) throws IOException;
+
+  void addFile(String fileName, long fileId) throws IOException;
+
   long openFile(String fileName) throws IOException;
 
   void openFile(long fileId) throws IOException;
 
   void openFile(String fileName, long fileId) throws IOException;
 
+  long bookFileId(String fileName) throws IOException;
+
   OCacheEntry load(long fileId, long pageIndex, boolean checkPinnedPages) throws IOException;
 
   void pinPage(OCacheEntry cacheEntry) throws IOException;
-
-  void loadPinnedPage(OCacheEntry cacheEntry) throws IOException;
 
   OCacheEntry allocateNewPage(long fileId) throws IOException;
 
@@ -120,9 +123,9 @@ public interface ODiskCache {
 
   void unlock() throws IOException;
 
-  void addLowDiskSpaceListener(OWOWCache.LowDiskSpaceListener listener);
+  void addLowDiskSpaceListener(OLowDiskSpaceListener listener);
 
-  void removeLowDiskSpaceListener(OWOWCache.LowDiskSpaceListener listener);
+  void removeLowDiskSpaceListener(OLowDiskSpaceListener listener);
 
   long getUsedMemory();
 

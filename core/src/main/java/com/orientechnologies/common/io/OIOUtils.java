@@ -19,6 +19,8 @@
  */
 package com.orientechnologies.common.io;
 
+import com.orientechnologies.common.util.OPatternConst;
+
 import java.io.*;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -26,12 +28,13 @@ import java.util.Date;
 import java.util.Locale;
 
 public class OIOUtils {
-  public static final long SECOND = 1000;
-  public static final long MINUTE = SECOND * 60;
-  public static final long HOUR   = MINUTE * 60;
-  public static final long DAY    = HOUR * 24;
-  public static final long YEAR   = DAY * 365;
-  public static final long WEEK   = DAY * 7;
+  public static final long   SECOND   = 1000;
+  public static final long   MINUTE   = SECOND * 60;
+  public static final long   HOUR     = MINUTE * 60;
+  public static final long   DAY      = HOUR * 24;
+  public static final long   YEAR     = DAY * 365;
+  public static final long   WEEK     = DAY * 7;
+  public static final String UTF8_BOM = "\uFEFF";
 
   public static byte[] toStream(Externalizable iSource) throws IOException {
     final ByteArrayOutputStream stream = new ByteArrayOutputStream();
@@ -67,7 +70,7 @@ public class OIOUtils {
       time = time.toUpperCase(Locale.ENGLISH);
 
       int pos = time.indexOf("MS");
-      final String timeAsNumber = time.replaceAll("[^\\d]", "");
+      final String timeAsNumber = OPatternConst.PATTERN_NUMBERS.matcher(time).replaceAll("");
       if (pos > -1)
         return Long.parseLong(timeAsNumber);
 
@@ -126,18 +129,24 @@ public class OIOUtils {
     return rslt;
   }
 
-  public static String readFileAsString(final File iFile) throws java.io.IOException {
+  public static String readFileAsString(final File iFile) throws IOException {
     return readStreamAsString(new FileInputStream(iFile));
   }
 
-  public static String readStreamAsString(final InputStream iStream) throws java.io.IOException {
+  public static String readStreamAsString(final InputStream iStream) throws IOException {
     final StringBuffer fileData = new StringBuffer(1000);
     final BufferedReader reader = new BufferedReader(new InputStreamReader(iStream));
     try {
       final char[] buf = new char[1024];
       int numRead = 0;
+
       while ((numRead = reader.read(buf)) != -1) {
         String readData = String.valueOf(buf, 0, numRead);
+
+        if (fileData.length() == 0 && readData.startsWith(UTF8_BOM))
+          // SKIP UTF-8 BOM IF ANY
+          readData = readData.substring(1);
+
         fileData.append(readData);
       }
     } finally {
@@ -146,7 +155,7 @@ public class OIOUtils {
     return fileData.toString();
   }
 
-  public static long copyStream(final InputStream in, final OutputStream out, long iMax) throws java.io.IOException {
+  public static long copyStream(final InputStream in, final OutputStream out, long iMax) throws IOException {
     if (iMax < 0)
       iMax = Long.MAX_VALUE;
 

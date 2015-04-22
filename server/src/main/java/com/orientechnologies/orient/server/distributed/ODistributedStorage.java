@@ -19,6 +19,24 @@
  */
 package com.orientechnologies.orient.server.distributed;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TimerTask;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicLong;
+
 import com.orientechnologies.common.concur.ONeedRetryException;
 import com.orientechnologies.common.concur.resource.OSharedResourceAdaptiveExternal;
 import com.orientechnologies.common.exception.OException;
@@ -31,9 +49,12 @@ import com.orientechnologies.orient.core.command.OCommandManager;
 import com.orientechnologies.orient.core.command.OCommandOutputListener;
 import com.orientechnologies.orient.core.command.OCommandRequestText;
 import com.orientechnologies.orient.core.command.ODistributedCommand;
+import com.orientechnologies.orient.core.command.script.OCommandScript;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.config.OStorageConfiguration;
 import com.orientechnologies.orient.core.conflict.ORecordConflictStrategy;
+import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
+import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.OScenarioThreadLocal;
 import com.orientechnologies.orient.core.db.OScenarioThreadLocal.RUN_MODE;
 import com.orientechnologies.orient.core.db.record.OCurrentStorageComponentsFactory;
@@ -43,8 +64,11 @@ import com.orientechnologies.orient.core.db.record.ridbag.sbtree.OSBTreeCollecti
 import com.orientechnologies.orient.core.exception.ORecordNotFoundException;
 import com.orientechnologies.orient.core.exception.OStorageException;
 import com.orientechnologies.orient.core.exception.OTransactionException;
+import com.orientechnologies.orient.core.exception.OValidationException;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
+import com.orientechnologies.orient.core.metadata.schema.OClass;
+import com.orientechnologies.orient.core.metadata.schema.clusterselection.OClusterSelectionStrategy;
 import com.orientechnologies.orient.core.record.ORecord;
 import com.orientechnologies.orient.core.record.ORecordInternal;
 import com.orientechnologies.orient.core.record.impl.ODocument;
@@ -63,34 +87,13 @@ import com.orientechnologies.orient.core.storage.OStorageOperationResult;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
 import com.orientechnologies.orient.core.storage.impl.local.OFreezableStorage;
 import com.orientechnologies.orient.core.tx.OTransaction;
+import com.orientechnologies.orient.core.tx.OTransactionAbstract;
+import com.orientechnologies.orient.core.tx.OTransactionInternal;
+import com.orientechnologies.orient.core.tx.OTransactionRealAbstract;
 import com.orientechnologies.orient.core.version.ORecordVersion;
 import com.orientechnologies.orient.server.OServer;
 import com.orientechnologies.orient.server.distributed.ODistributedRequest.EXECUTION_MODE;
-import com.orientechnologies.orient.server.distributed.task.OAbstractRecordReplicatedTask;
-import com.orientechnologies.orient.server.distributed.task.OAbstractRemoteTask;
-import com.orientechnologies.orient.server.distributed.task.OCreateRecordTask;
-import com.orientechnologies.orient.server.distributed.task.ODeleteRecordTask;
-import com.orientechnologies.orient.server.distributed.task.OReadRecordTask;
-import com.orientechnologies.orient.server.distributed.task.OSQLCommandTask;
-import com.orientechnologies.orient.server.distributed.task.OTxTask;
-import com.orientechnologies.orient.server.distributed.task.OUpdateRecordTask;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TimerTask;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
+import com.orientechnologies.orient.server.distributed.task.*;
 
 /**
  * Distributed storage implementation that routes to the owner node the request.
@@ -106,7 +109,7 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
   protected final ConcurrentHashMap<ORecordId, OPair<Long, ORecordVersion>> deletedRecords  = new ConcurrentHashMap<ORecordId, OPair<Long, ORecordVersion>>();
   protected final AtomicLong                                                lastOperationId = new AtomicLong();
 
-  protected final ArrayBlockingQueue<OAsynchDistributedOperation>           asynchronousOperationsQueue;
+  protected final BlockingQueue<OAsynchDistributedOperation>                asynchronousOperationsQueue;
   protected final Thread                                                    asynchWorker;
   protected volatile boolean                                                running         = true;
 
@@ -144,9 +147,16 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
       }
     };
 
-    Orient.instance().scheduleTask(purgeDeletedRecordsTask, OGlobalConfiguration.DISTRIBUTED_PURGE_RESPONSES_TIMER_DELAY.getValueAsLong(), OGlobalConfiguration.DISTRIBUTED_PURGE_RESPONSES_TIMER_DELAY.getValueAsLong());
+    Orient.instance().scheduleTask(purgeDeletedRecordsTask,
+        OGlobalConfiguration.DISTRIBUTED_PURGE_RESPONSES_TIMER_DELAY.getValueAsLong(),
+        OGlobalConfiguration.DISTRIBUTED_PURGE_RESPONSES_TIMER_DELAY.getValueAsLong());
 
-    asynchronousOperationsQueue = new ArrayBlockingQueue<OAsynchDistributedOperation>(10000);
+    final int queueSize = OGlobalConfiguration.DISTRIBUTED_ASYNCH_QUEUE_SIZE.getValueAsInteger();
+    if (queueSize <= 0)
+      asynchronousOperationsQueue = new LinkedBlockingQueue<OAsynchDistributedOperation>();
+    else
+      asynchronousOperationsQueue = new LinkedBlockingQueue<OAsynchDistributedOperation>(queueSize);
+
     asynchWorker = new Thread() {
       @Override
       public void run() {
@@ -188,7 +198,7 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
 
   @Override
   public boolean isAssigningClusterIds() {
-    return OScenarioThreadLocal.INSTANCE.get() != RUN_MODE.RUNNING_DISTRIBUTED;
+    return true;
   }
 
   @Override
@@ -203,14 +213,16 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
       servers = new ArrayList<String>();
       iCommand.getContext().setVariable("servers", servers);
     }
-    servers.add(dManager.getLocalNodeName());
+    final String localNodeName = dManager.getLocalNodeName();
+
+    servers.add(localNodeName);
 
     if (OScenarioThreadLocal.INSTANCE.get() == RUN_MODE.RUNNING_DISTRIBUTED)
       // ALREADY DISTRIBUTED
       return wrapped.command(iCommand);
 
     final ODistributedConfiguration dbCfg = dManager.getDatabaseConfiguration(getName());
-    if (!dbCfg.isReplicationActive(null, dManager.getLocalNodeName()))
+    if (!dbCfg.isReplicationActive(null, localNodeName))
       // DON'T REPLICATE
       return wrapped.command(iCommand);
 
@@ -222,8 +234,12 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
     final OCommandExecutor exec = executor instanceof OCommandExecutorSQLDelegate ? ((OCommandExecutorSQLDelegate) executor)
         .getDelegate() : executor;
 
+    if (!exec.isIdempotent())
+      checkNodeIsMaster(localNodeName, dbCfg);
+
     try {
-      final OSQLCommandTask task = new OSQLCommandTask(iCommand);
+      final OAbstractCommandTask task = iCommand instanceof OCommandScript ? new OScriptTask(iCommand) : new OSQLCommandTask(
+          iCommand);
 
       Object result = null;
       OCommandDistributedReplicateRequest.DISTRIBUTED_EXECUTION_MODE executionMode = OCommandDistributedReplicateRequest.DISTRIBUTED_EXECUTION_MODE.LOCAL;
@@ -247,7 +263,14 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
         if (iCommand instanceof ODistributedCommand)
           nodes.removeAll(((ODistributedCommand) iCommand).nodesToExclude());
 
+        if (nodes.isEmpty())
+          // / NO NODE TO REPLICATE
+          return null;
+
         result = dManager.sendRequest(getName(), involvedClusters, nodes, task, EXECUTION_MODE.RESPONSE);
+
+        dManager.propagateSchemaChanges(ODatabaseRecordThreadLocal.INSTANCE.get());
+
         break;
       }
 
@@ -258,7 +281,7 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
 
         task.setResultStrategy(OAbstractRemoteTask.RESULT_STRATEGY.UNION);
 
-        nodes = dbCfg.getOneServerPerCluster(involvedClusters, dManager.getLocalNodeName());
+        nodes = dbCfg.getOneServerPerCluster(involvedClusters, localNodeName);
 
         if (iCommand instanceof ODistributedCommand)
           nodes.removeAll(((ODistributedCommand) iCommand).nodesToExclude());
@@ -275,10 +298,10 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
               maxReadQuorum = Math.max(maxReadQuorum, dbCfg.getReadQuorum(cl));
           }
 
-          if (nodes.size() == 1 && nodes.iterator().next().equals(dManager.getLocalNodeName()) && maxReadQuorum <= 1)
+          if (nodes.size() == 1 && nodes.iterator().next().equals(localNodeName) && maxReadQuorum <= 1)
             executeLocally = true;
 
-        } else if (nodes.size() == 1 && nodes.iterator().next().equals(dManager.getLocalNodeName()))
+        } else if (nodes.size() == 1 && nodes.iterator().next().equals(localNodeName))
           executeLocally = true;
 
         if (executeLocally)
@@ -408,12 +431,16 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
       String clusterName = getClusterNameByRID(iRecordId);
 
       int clusterId = iRecordId.getClusterId();
-      if (clusterId == ORID.CLUSTER_ID_INVALID) {
+      if (clusterId == ORID.CLUSTER_ID_INVALID)
         throw new IllegalArgumentException("Cluster not valid");
-      }
+
+      final String localNodeName = dManager.getLocalNodeName();
 
       final ODistributedConfiguration dbCfg = dManager.getDatabaseConfiguration(getName());
-      final List<String> nodes = dbCfg.getServers(clusterName, null);
+
+      checkNodeIsMaster(localNodeName, dbCfg);
+
+      List<String> nodes = dbCfg.getServers(clusterName, null);
 
       if (nodes.isEmpty()) {
         // DON'T REPLICATE OR DISTRIBUTE
@@ -425,10 +452,35 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
         });
       }
 
-      final String masterNode = nodes.get(0);
-      if (!masterNode.equals(dManager.getLocalNodeName()))
-        throw new ODistributedException("Error on inserting into cluster '" + clusterName + "' where local node '"
-            + dManager.getLocalNodeName() + "' is not the master of it, but it's '" + masterNode + "'");
+      String masterNode = nodes.get(0);
+      if (!masterNode.equals(localNodeName)) {
+        final OCluster cl = getClusterByName(clusterName);
+        final ODatabaseDocumentInternal db = ODatabaseRecordThreadLocal.INSTANCE.get();
+        final OClass cls = db.getMetadata().getSchema().getClassByClusterId(cl.getId());
+        String newClusterName = null;
+        if (cls != null) {
+          OClusterSelectionStrategy clSel = cls.getClusterSelection();
+          if (!(clSel instanceof OLocalClusterStrategy)) {
+            dManager.propagateSchemaChanges(db);
+            clSel = cls.getClusterSelection();
+          }
+
+          newClusterName = getPhysicalClusterNameById(clSel.getCluster(cls, null));
+          nodes = dbCfg.getServers(newClusterName, null);
+          masterNode = nodes.get(0);
+        }
+
+        if (!masterNode.equals(localNodeName))
+          throw new ODistributedException("Error on inserting into cluster '" + clusterName + "' where local node '"
+              + localNodeName + "' is not the master of it, but it's '" + masterNode + "'");
+
+        OLogManager.instance().warn(
+            this,
+            "Local node '" + localNodeName + "' is not the master for cluster '" + clusterName + "' (it's '" + masterNode
+                + "'). Switching to a valid cluster of the same class: '" + newClusterName + "'");
+
+        clusterName = newClusterName;
+      }
 
       Boolean executionModeSynch = dbCfg.isExecutionModeSynchronous(clusterName);
       if (executionModeSynch == null)
@@ -462,7 +514,7 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
       });
 
       // ASYNCHRONOUSLY REPLICATE IT TO ALL THE OTHER NODES
-      nodes.remove(dManager.getLocalNodeName());
+      nodes.remove(localNodeName);
       if (!nodes.isEmpty()) {
         asynchronousExecution(new OAsynchDistributedOperation(getName(), Collections.singleton(clusterName), nodes,
             new OCreateRecordTask(iRecordId, iContent, iRecordVersion, iRecordType)));
@@ -542,6 +594,11 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
       final String clusterName = getClusterNameByRID(iRecordId);
 
       final ODistributedConfiguration dbCfg = dManager.getDatabaseConfiguration(getName());
+
+      final String localNodeName = dManager.getLocalNodeName();
+
+      checkNodeIsMaster(localNodeName, dbCfg);
+
       final List<String> nodes = dbCfg.getServers(clusterName, null);
 
       if (nodes.isEmpty()) {
@@ -566,8 +623,8 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
 
         // REPLICATE IT
         final Object result = dManager.sendRequest(getName(), Collections.singleton(clusterName), nodes, new OUpdateRecordTask(
-            iRecordId, previousContent.getResult().getBuffer(), previousContent.getResult().version, iContent, iVersion),
-            EXECUTION_MODE.RESPONSE);
+            iRecordId, previousContent.getResult().getBuffer(), previousContent.getResult().version, iContent, iVersion,
+            iRecordType), EXECUTION_MODE.RESPONSE);
 
         if (result instanceof ONeedRetryException)
           throw (ONeedRetryException) result;
@@ -586,7 +643,7 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
         }
       });
 
-      nodes.remove(dManager.getLocalNodeName());
+      nodes.remove(localNodeName);
       if (!nodes.isEmpty()) {
         // LOAD PREVIOUS CONTENT TO BE USED IN CASE OF UNDO
         final OStorageOperationResult<ORawBuffer> previousContent = readRecord(iRecordId, null, false, null, false,
@@ -594,7 +651,7 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
 
         asynchronousExecution(new OAsynchDistributedOperation(getName(), Collections.singleton(clusterName), nodes,
             new OUpdateRecordTask(iRecordId, previousContent.getResult().getBuffer(), previousContent.getResult().version,
-                iContent, iVersion)));
+                iContent, iVersion, iRecordType)));
       }
 
       return localResult;
@@ -620,6 +677,11 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
       final String clusterName = getClusterNameByRID(iRecordId);
 
       final ODistributedConfiguration dbCfg = dManager.getDatabaseConfiguration(getName());
+
+      final String localNodeName = dManager.getLocalNodeName();
+
+      checkNodeIsMaster(localNodeName, dbCfg);
+
       final List<String> nodes = dbCfg.getServers(clusterName, null);
 
       if (nodes.isEmpty()) {
@@ -657,7 +719,7 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
         }
       });
 
-      nodes.remove(dManager.getLocalNodeName());
+      nodes.remove(localNodeName);
       if (!nodes.isEmpty())
         asynchronousExecution(new OAsynchDistributedOperation(getName(), Collections.singleton(clusterName), nodes,
             new ODeleteRecordTask(iRecordId, iVersion)));
@@ -770,9 +832,14 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
       return;
     }
 
+    final ODistributedConfiguration dbCfg = dManager.getDatabaseConfiguration(getName());
+
+    final String localNodeName = dManager.getLocalNodeName();
+
+    checkNodeIsMaster(localNodeName, dbCfg);
+
     try {
-      final ODistributedConfiguration dbCfg = dManager.getDatabaseConfiguration(getName());
-      if (!dbCfg.isReplicationActive(null, dManager.getLocalNodeName())) {
+      if (!dbCfg.isReplicationActive(null, localNodeName)) {
         // DON'T REPLICATE
         ODistributedAbstractPlugin.runInDistributedMode(new Callable() {
           @Override
@@ -785,55 +852,75 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
         return;
       }
 
+      OTransactionInternal.setStatus((OTransactionAbstract) iTx, OTransaction.TXSTATUS.BEGUN);
+
       final OTxTask txTask = new OTxTask();
       final Set<String> involvedClusters = new HashSet<String>();
-
-      for (ORecordOperation op : iTx.getCurrentRecordEntries()) {
-        final OAbstractRecordReplicatedTask task;
-
-        final ORecord record = op.getRecord();
-
-        final ORecordId rid = (ORecordId) op.record.getIdentity();
-
-        switch (op.type) {
-        case ORecordOperation.CREATED:
-          final byte[] stream = record.toStream();
-          if (rid.isNew()) {
-            task = new OCreateRecordTask(rid, stream, record.getRecordVersion(), ORecordInternal.getRecordType(record));
-            break;
-          }
-          // ELSE TREAT IT AS UPDATE: GO DOWN
-
-        case ORecordOperation.UPDATED:
-          // LOAD PREVIOUS CONTENT TO BE USED IN CASE OF UNDO
-          final OStorageOperationResult<ORawBuffer> previousContent = wrapped.readRecord(rid, null, false, null, false,
-              LOCKING_STRATEGY.DEFAULT);
-
-          if (previousContent.getResult() == null)
-            // DELETED
-            throw new OTransactionException("Cannot update record '" + rid + "' because has been deleted");
-
-          task = new OUpdateRecordTask(rid, previousContent.getResult().getBuffer(), previousContent.getResult().version,
-              record.toStream(), record.getRecordVersion());
-          break;
-
-        case ORecordOperation.DELETED:
-          task = new ODeleteRecordTask(rid, record.getRecordVersion());
-          break;
-
-        default:
-          continue;
-        }
-
-        involvedClusters.add(getClusterNameByRID(rid));
-        txTask.add(task);
-      }
 
       final Set<String> nodes = dbCfg.getServers(involvedClusters);
 
       Boolean executionModeSynch = dbCfg.isExecutionModeSynchronous(null);
       if (executionModeSynch == null)
         executionModeSynch = Boolean.TRUE;
+
+      final List<ORecordOperation> tmpEntries = new ArrayList<ORecordOperation>();
+
+      while (iTx.getCurrentRecordEntries().iterator().hasNext()) {
+        for (ORecordOperation txEntry : iTx.getCurrentRecordEntries())
+          tmpEntries.add(txEntry);
+
+        iTx.clearRecordEntries();
+
+        for (ORecordOperation op : tmpEntries) {
+          final OAbstractRecordReplicatedTask task;
+
+          final ORecord record = op.getRecord();
+
+          final ORecordId rid = (ORecordId) record.getIdentity();
+
+          switch (op.type) {
+          case ORecordOperation.CREATED:
+            if (rid.isNew()) {
+              // CREATE THE TASK PASSING THE RECORD OR A COPY BASED ON EXECUTION TYPE: IF ASYNCHRONOUS THE COPY PREVENT TO EARLY
+              // ASSIGN CLUSTER IDS
+              final ORecord rec = executionModeSynch ? record : record.copy();
+              task = new OCreateRecordTask(rec);
+              if (record instanceof ODocument)
+                ((ODocument) record).validate();
+              break;
+            }
+            // ELSE TREAT IT AS UPDATE: GO DOWN
+
+          case ORecordOperation.UPDATED:
+            if (record instanceof ODocument)
+              ((ODocument) record).validate();
+
+            // LOAD PREVIOUS CONTENT TO BE USED IN CASE OF UNDO
+            final OStorageOperationResult<ORawBuffer> previousContent = wrapped.readRecord(rid, null, false, null, false,
+                LOCKING_STRATEGY.DEFAULT);
+
+            if (previousContent.getResult() == null)
+              // DELETED
+              throw new OTransactionException("Cannot update record '" + rid + "' because has been deleted");
+
+            task = new OUpdateRecordTask(rid, previousContent.getResult().getBuffer(), previousContent.getResult().version,
+                record.toStream(), record.getRecordVersion(), ORecordInternal.getRecordType(record));
+            break;
+
+          case ORecordOperation.DELETED:
+            task = new ODeleteRecordTask(rid, record.getRecordVersion());
+            break;
+
+          default:
+            continue;
+          }
+
+          involvedClusters.add(getClusterNameByRID(rid));
+          txTask.add(task);
+        }
+      }
+
+      OTransactionInternal.setStatus((OTransactionAbstract) iTx, OTransaction.TXSTATUS.COMMITTING);
 
       // if (executionModeSynch && !iTx.hasRecordCreation()) {
       if (executionModeSynch) {
@@ -860,10 +947,18 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
             }
 
           }
+
+          // RESET DIRTY FLAGS TO AVOID CALLING AUTO-SAVE
+          for (ORecordOperation op : tmpEntries) {
+            final ORecord record = op.getRecord();
+            if (record != null)
+              ORecordInternal.unsetDirty(record);
+          }
+
         } else if (result instanceof Throwable) {
           // EXCEPTION: LOG IT AND ADD AS NESTED EXCEPTION
           if (ODistributedServerLog.isDebugEnabled())
-            ODistributedServerLog.debug(this, dManager.getLocalNodeName(), null, ODistributedServerLog.DIRECTION.NONE,
+            ODistributedServerLog.debug(this, localNodeName, null, ODistributedServerLog.DIRECTION.NONE,
                 "distributed transaction error: %s", result, result.toString());
 
           if (result instanceof OTransactionException || result instanceof ONeedRetryException)
@@ -873,7 +968,7 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
         } else {
           // UNKNOWN RESPONSE TYPE
           if (ODistributedServerLog.isDebugEnabled())
-            ODistributedServerLog.debug(this, dManager.getLocalNodeName(), null, ODistributedServerLog.DIRECTION.NONE,
+            ODistributedServerLog.debug(this, localNodeName, null, ODistributedServerLog.DIRECTION.NONE,
                 "distributed transaction error, received unknown response type: %s", result);
 
           throw new OTransactionException("Error on committing distributed transaction, received unknown response type " + result);
@@ -882,15 +977,17 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
         return;
       }
 
+      // ASYNCH
       ODistributedAbstractPlugin.runInDistributedMode(new Callable() {
         @Override
         public Object call() throws Exception {
+          ((OTransactionRealAbstract) iTx).restore();
           wrapped.commit(iTx, callback);
           return null;
         }
       });
 
-      nodes.remove(dManager.getLocalNodeName());
+      nodes.remove(localNodeName);
       if (!nodes.isEmpty()) {
         if (executionModeSynch)
           dManager.sendRequest(getName(), involvedClusters, nodes, txTask, EXECUTION_MODE.RESPONSE);
@@ -899,6 +996,8 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
           asynchronousExecution(new OAsynchDistributedOperation(getName(), involvedClusters, nodes, txTask));
       }
 
+    } catch (OValidationException e) {
+      throw e;
     } catch (Exception e) {
       handleDistributedException("Cannot route TX operation against distributed node", e);
     }
@@ -944,12 +1043,16 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
         final StringBuilder cmd = new StringBuilder("create cluster ");
         cmd.append(iClusterName);
 
-        // EXECUTE THIS OUTSIDE LCK TO AVOID DEADLOCKS
+        // EXECUTE THIS OUTSIDE LOCK TO AVOID DEADLOCKS
         OCommandSQL commandSQL = new OCommandSQL(cmd.toString());
         commandSQL.addExcludedNode(getNodeId());
 
         final Object result = command(commandSQL);
-        if (((Integer) result).intValue() != clId) {
+        if (result != null && ((Integer) result).intValue() != clId) {
+          OLogManager.instance().warn(this,
+              "Error on creating cluster on distributed nodes: ids are different (local=%d and remote=%d). Retrying %d/%d...",
+              clId, ((Integer) result).intValue(), retry, 10);
+
           wrapped.dropCluster(clId, false);
 
           // REMOVE ON REMOTE NODES TOO
@@ -967,13 +1070,14 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
           } catch (InterruptedException e) {
           }
 
+          wrapped.reload();
           continue;
         }
       }
       return clId;
     }
 
-    throw new ODistributedException("Error on creating cluster: local and remote id assigned are different");
+    throw new ODistributedException("Error on creating cluster on distributed nodes: local and remote ids assigned are different");
   }
 
   @Override
@@ -1201,19 +1305,27 @@ public class ODistributedStorage implements OStorage, OFreezableStorage, OAutosh
     asynchronousOperationsQueue.clear();
   }
 
+  protected void checkNodeIsMaster(final String localNodeName, final ODistributedConfiguration dbCfg) {
+    final ODistributedConfiguration.ROLES nodeRole = dbCfg.getServerRole(localNodeName);
+    if (nodeRole != ODistributedConfiguration.ROLES.MASTER)
+      throw new ODistributedException("Cannot execute write operation on node '" + localNodeName + "' because is non master");
+  }
+
   protected void asynchronousExecution(final OAsynchDistributedOperation iOperation) {
     asynchronousOperationsQueue.offer(iOperation);
   }
 
   protected void handleDistributedException(final String iMessage, final Exception e, final Object... iParams) {
-    OLogManager.instance().error(this, iMessage, e, iParams);
-    final Throwable t = e.getCause();
-    if (t != null) {
-      if (t instanceof OException)
-        throw (OException) t;
-      else if (t.getCause() instanceof OException)
-        throw (OException) t.getCause();
+    if (e != null) {
+      if (e instanceof OException)
+        throw (OException) e;
+      else if (e.getCause() instanceof OException)
+        throw (OException) e.getCause();
+      else if (e.getCause() != null && e.getCause().getCause() instanceof OException)
+        throw (OException) e.getCause().getCause();
     }
+
+    OLogManager.instance().error(this, iMessage, e, iParams);
     throw new OStorageException(String.format(iMessage, iParams), e);
   }
 

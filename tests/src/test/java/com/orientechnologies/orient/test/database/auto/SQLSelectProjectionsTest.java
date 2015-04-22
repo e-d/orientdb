@@ -15,14 +15,6 @@
  */
 package com.orientechnologies.orient.test.database.auto;
 
-import java.io.IOException;
-import java.util.List;
-
-import org.testng.Assert;
-import org.testng.annotations.Optional;
-import org.testng.annotations.Parameters;
-import org.testng.annotations.Test;
-
 import com.orientechnologies.common.collection.OMultiValue;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.id.ORID;
@@ -34,6 +26,15 @@ import com.orientechnologies.orient.core.sql.OCommandSQLParsingException;
 import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
 import com.orientechnologies.orient.enterprise.channel.binary.OResponseProcessingException;
 import com.orientechnologies.orient.object.db.OObjectDatabaseTx;
+import org.testng.Assert;
+import org.testng.annotations.Optional;
+import org.testng.annotations.Parameters;
+import org.testng.annotations.Test;
+
+import java.io.IOException;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 @Test(groups = "sql-select")
 public class SQLSelectProjectionsTest extends DocumentDBBaseTest {
@@ -172,23 +173,25 @@ public class SQLSelectProjectionsTest extends DocumentDBBaseTest {
     }
   }
 
-  @Test
-  public void queryProjectionAliases() {
-    List<ODocument> result = database.command(
-        new OSQLSynchQuery<ODocument>(
-            "select name.append('!') as 1, surname as 2 from Profile where name is not null and surname is not null")).execute();
 
-    Assert.assertTrue(result.size() != 0);
-
-    for (ODocument d : result) {
-      Assert.assertTrue(d.fieldNames().length <= 2);
-      Assert.assertTrue(d.field("1").toString().endsWith("!"));
-      Assert.assertNotNull(d.field("2"));
-
-      Assert.assertNull(d.getClassName());
-      Assert.assertEquals(ORecordInternal.getRecordType(d), ODocument.RECORD_TYPE);
-    }
-  }
+  //TODO invalid test, invalid integer alias
+//  @Test
+//  public void queryProjectionAliases() {
+//    List<ODocument> result = database.command(
+//        new OSQLSynchQuery<ODocument>(
+//            "select name.append('!') as 1, surname as 2 from Profile where name is not null and surname is not null")).execute();
+//
+//    Assert.assertTrue(result.size() != 0);
+//
+//    for (ODocument d : result) {
+//      Assert.assertTrue(d.fieldNames().length <= 2);
+//      Assert.assertTrue(d.field("1").toString().endsWith("!"));
+//      Assert.assertNotNull(d.field("2"));
+//
+//      Assert.assertNull(d.getClassName());
+//      Assert.assertEquals(ORecordInternal.getRecordType(d), ODocument.RECORD_TYPE);
+//    }
+//  }
 
   @Test
   public void queryProjectionSimpleValues() {
@@ -218,33 +221,6 @@ public class SQLSelectProjectionsTest extends DocumentDBBaseTest {
       Assert.assertNotNull(d.field("json"));
 
       new ODocument().fromJSON((String) d.field("json"));
-    }
-  }
-
-  @Test
-  public void queryProjectionContentCollection() {
-    List<ODocument> result = database.command(
-        new OSQLSynchQuery<ODocument>("SELECT FLATTEN( outE() ) FROM V WHERE outE() TRAVERSE(1,1) (@class = 'E')")).execute();
-
-    Assert.assertTrue(result.size() != 0);
-
-    for (ODocument d : result) {
-      Assert.assertTrue(d.getSchemaClass().isSubClassOf("E"));
-      Assert.assertEquals(ORecordInternal.getRecordType(d), ODocument.RECORD_TYPE);
-    }
-  }
-
-  @Test
-  public void queryProjectionFlattenError() {
-    try {
-      database.command(new OSQLSynchQuery<ODocument>("SELECT FLATTEN( out_ ), in_ FROM V WHERE out_ TRAVERSE(1,1) (@class = 'E')"))
-          .execute();
-
-      Assert.fail();
-    } catch (OCommandSQLParsingException e) {
-
-    } catch (OResponseProcessingException e) {
-      Assert.assertTrue(e.getCause() instanceof OCommandSQLParsingException);
     }
   }
 
@@ -420,6 +396,35 @@ public class SQLSelectProjectionsTest extends DocumentDBBaseTest {
       database.command(new OCommandSQL("drop class A unsafe ")).execute();
       database.command(new OCommandSQL("drop class B unsafe ")).execute();
       database.command(new OCommandSQL("drop class C unsafe ")).execute();
+    }
+  }
+
+  @Test
+  public void testTempRIDsAreNotRecycledInResultSet() {
+    final List<OIdentifiable> resultset = database.query(new OSQLSynchQuery<ODocument>(
+        "select name, $l as l from OUser let $l = (select name from OuSer)"));
+
+    Assert.assertNotNull(resultset);
+
+    Set<ORID> rids = new HashSet<ORID>();
+    for (OIdentifiable d : resultset) {
+      final ORID rid = d.getIdentity();
+      Assert.assertFalse(rids.contains(rid));
+
+      rids.add(rid);
+
+      final List<OIdentifiable> embeddedList = ((ODocument) d.getRecord()).field("l");
+      Assert.assertNotNull(embeddedList);
+      Assert.assertFalse(embeddedList.isEmpty());
+
+      for (OIdentifiable embedded : embeddedList) {
+        if( embedded != null ) {
+          final ORID embeddedRid = embedded.getIdentity();
+
+          Assert.assertFalse(rids.contains(embeddedRid));
+          rids.add(rid);
+        }
+      }
     }
   }
 

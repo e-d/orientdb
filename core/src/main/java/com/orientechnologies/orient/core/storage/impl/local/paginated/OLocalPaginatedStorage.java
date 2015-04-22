@@ -166,7 +166,7 @@ public class OLocalPaginatedStorage extends OAbstractPaginatedStorage implements
   public void restore(InputStream in, Map<String, Object> options, final Callable<Object> callable,
       final OCommandOutputListener iListener) throws IOException {
     if (!isClosed())
-      close();
+      close(true,false);
 
     OZIPCompressionUtil.uncompressDirectory(in, getStoragePath(), iListener);
   }
@@ -281,7 +281,7 @@ public class OLocalPaginatedStorage extends OAbstractPaginatedStorage implements
       checkpointExecutor = Executors.newSingleThreadExecutor(new FullCheckpointThreadFactory());
 
       writeAheadLog = new ODiskWriteAheadLog(this);
-
+			writeAheadLog.addFullCheckpointListener(this);
     } else
       writeAheadLog = null;
 

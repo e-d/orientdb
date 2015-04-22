@@ -16,15 +16,16 @@
 
 package com.orientechnologies.orient.core.metadata.schema;
 
-import java.io.IOException;
-import java.util.Collection;
-import java.util.Map;
-import java.util.Set;
-
 import com.orientechnologies.common.listener.OProgressListener;
 import com.orientechnologies.orient.core.index.OIndex;
 import com.orientechnologies.orient.core.metadata.schema.clusterselection.OClusterSelectionStrategy;
 import com.orientechnologies.orient.core.record.impl.ODocument;
+
+import java.io.IOException;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Abstract Delegate for OClass interface.
@@ -76,6 +77,7 @@ public abstract class OClassAbstractDelegate implements OClass {
     delegate.setSuperClass(iSuperClass);
     return this;
   }
+  
 
   @Override
   public String getName() {
@@ -83,6 +85,44 @@ public abstract class OClassAbstractDelegate implements OClass {
   }
 
   @Override
+  public List<OClass> getSuperClasses() {
+	return delegate.getSuperClasses();
+  }
+  
+  @Override
+	public boolean hasSuperClasses() {
+		return delegate.hasSuperClasses();
+	}
+
+  @Override
+  public OClass setSuperClasses(List<? extends OClass> classes) {
+	delegate.setSuperClasses(classes);
+	return this;
+  }
+	
+	@Override
+	public List<String> getSuperClassesNames() {
+		return delegate.getSuperClassesNames();
+	}
+	
+	@Override
+	public void getIndexes(Collection<OIndex<?>> indexes) {
+		delegate.getIndexes(indexes);
+	}
+
+@Override
+  public OClass addSuperClass(OClass superClass) {
+	delegate.addSuperClass(superClass);
+	return this;
+  }
+
+  @Override
+  public OClass removeSuperClass(OClass superClass) {
+	delegate.removeSuperClass(superClass);
+	return this;
+  }
+
+@Override
   public OClass setName(String iName) {
     delegate.setName(iName);
     return this;
@@ -208,14 +248,24 @@ public abstract class OClassAbstractDelegate implements OClass {
     return delegate.getPolymorphicClusterIds();
   }
 
+
+  @Override
+  public Collection<OClass> getSubclasses() {
+    return delegate.getSubclasses();
+  }
+
   @Override
   public Collection<OClass> getBaseClasses() {
-    return delegate.getBaseClasses();
+    return delegate.getSubclasses();
+  }
+  @Override
+  public Collection<OClass> getAllSubclasses() {
+    return delegate.getAllSubclasses();
   }
 
   @Override
   public Collection<OClass> getAllBaseClasses() {
-    return delegate.getAllBaseClasses();
+    return delegate.getAllSubclasses();
   }
 
   @Override

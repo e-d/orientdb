@@ -21,13 +21,11 @@ package com.orientechnologies.orient.object.db;
 
 import com.orientechnologies.common.collection.OMultiValue;
 import com.orientechnologies.common.log.OLogManager;
+import com.orientechnologies.common.util.OCommonConst;
 import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.conflict.ORecordConflictStrategy;
-import com.orientechnologies.orient.core.db.ODatabase;
-import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
-import com.orientechnologies.orient.core.db.ODatabaseInternal;
-import com.orientechnologies.orient.core.db.OUserObject2RecordHandler;
+import com.orientechnologies.orient.core.db.*;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.db.object.ODatabaseObject;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
@@ -110,7 +108,7 @@ public class OObjectDatabaseTx extends ODatabasePojoAbstract<Object> implements 
   }
 
   public <T> T newInstance(final Class<T> iType) {
-    return (T) newInstance(iType.getSimpleName(), null, new Object[0]);
+    return (T) newInstance(iType.getSimpleName(), null, OCommonConst.EMPTY_OBJECT_ARRAY);
   }
 
   public <T> T newInstance(final Class<T> iType, Object... iArgs) {
@@ -118,7 +116,7 @@ public class OObjectDatabaseTx extends ODatabasePojoAbstract<Object> implements 
   }
 
   public <RET> RET newInstance(String iClassName) {
-    return (RET) newInstance(iClassName, null, new Object[0]);
+    return (RET) newInstance(iClassName, null, OCommonConst.EMPTY_OBJECT_ARRAY);
   }
 
   @Override
@@ -145,6 +143,11 @@ public class OObjectDatabaseTx extends ODatabasePojoAbstract<Object> implements 
     if (metadata == null)
       metadata = new OMetadataObject((OMetadataInternal) underlying.getMetadata());
     return metadata;
+  }
+
+  @Override
+  public Iterable<ODatabaseListener> getListeners() {
+    return underlying.getListeners();
   }
 
   /**

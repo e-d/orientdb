@@ -173,7 +173,7 @@ function ODatabase(databasePath) {
 		}
 		$.ajax({
 			beforeSend: function(xhr){
-					if( userName != '' && userPass != '' )
+					if( userName != '' )
       					return xhr.setRequestHeader('Authorization', 'BASIC ' + btoa(userName+':'+userPass));
     			},
 			type : type,
@@ -260,7 +260,7 @@ function ODatabase(databasePath) {
 
 
 	ODatabase.prototype.query = function(iQuery, iLimit, iFetchPlan,
-			successCallback) {
+			successCallback, errorCallback) {
 		if (this.databaseInfo == null)
 			this.open();
 		
@@ -276,21 +276,23 @@ function ODatabase(databasePath) {
 			type : "GET",
 			url : this.urlPrefix + url + this.urlSuffix,
 			context : this,
-			async : false,
+			async : successCallback instanceof Function,
 			contentType : "application/json; charset=utf-8",
 			processData : false,
 			success : function(msg) {
 				this.setErrorMessage(null);
 				this.handleResponse(msg);
 				if (successCallback)
-					successCallback();
+					successCallback(this.commandResult);
 			},
 			error : function(msg) {
 				this.handleResponse(null);
 				this.setErrorMessage('Query error: ' + msg.responseText);
+				if (errorCallback)
+					errorCallback(this.errorMessage);
 			}
 		});
-		return this.getCommandResult();
+		return successCallback instanceof Function ? null : this.getCommandResult();
 	}
 
 	ODatabase.prototype.load = function(iRID, iFetchPlan) {

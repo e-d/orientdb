@@ -15,6 +15,11 @@
  */
 package com.orientechnologies.orient.graph.sql;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+
 import com.orientechnologies.common.types.OModifiableBoolean;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
@@ -23,15 +28,9 @@ import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
 import com.orientechnologies.orient.core.sql.OCommandExecutorSQLAbstract;
 import com.orientechnologies.orient.core.sql.OCommandExecutorSQLFactory;
-import com.tinkerpop.blueprints.Graph;
 import com.tinkerpop.blueprints.impls.orient.OrientBaseGraph;
 import com.tinkerpop.blueprints.impls.orient.OrientGraph;
 import com.tinkerpop.blueprints.impls.orient.OrientGraphNoTx;
-
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * Graph related command operator executor factory. It's auto-discovered.
@@ -78,13 +77,9 @@ public class OGraphCommandExecutorSQLFactory implements OCommandExecutorSQLFacto
       final ODatabaseDocumentTx graphDb = result.getRawGraph();
 
       if (!graphDb.isClosed()) {
-        final OrientGraph g = (OrientGraph) result;
-        g.setAutoStartTx(autoStartTx);
-
         ODatabaseRecordThreadLocal.INSTANCE.set(graphDb);
-
         shouldBeShutDown.setValue(false);
-        return g;
+        return (OrientGraph) result;
       }
     }
     // Set it again on ThreadLocal because the getRawGraph() may have set a closed db in the thread-local
@@ -106,13 +101,13 @@ public class OGraphCommandExecutorSQLFactory implements OCommandExecutorSQLFacto
 
       if (!graphDb.isClosed()) {
         ODatabaseRecordThreadLocal.INSTANCE.set(graphDb);
-				shouldBeShutDown.setValue(false);
+        shouldBeShutDown.setValue(false);
         return (OrientGraphNoTx) result;
       }
     }
 
     // Set it again on ThreadLocal because the getRawGraph() may have set a closed db in the thread-local
-		shouldBeShutDown.setValue(true);
+    shouldBeShutDown.setValue(true);
     ODatabaseRecordThreadLocal.INSTANCE.set((ODatabaseDocumentInternal) database);
     return new OrientGraphNoTx((ODatabaseDocumentTx) database);
   }
@@ -141,12 +136,14 @@ public class OGraphCommandExecutorSQLFactory implements OCommandExecutorSQLFacto
 
   public static <T> T runInTx(final GraphCallBack<T> callBack) {
     OModifiableBoolean shutdownFlag = new OModifiableBoolean();
+    ODatabaseDocumentInternal curDb = ODatabaseRecordThreadLocal.INSTANCE.get();
     OrientGraph graph = OGraphCommandExecutorSQLFactory.getGraph(false, shutdownFlag);
     try {
       return runInTx(graph, callBack);
     } finally {
       if (shutdownFlag.getValue())
-        graph.shutdown(false);
+        graph.shutdown(false, false);
+      ODatabaseRecordThreadLocal.INSTANCE.set(curDb);
     }
   }
 

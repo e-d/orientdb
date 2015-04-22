@@ -1071,7 +1071,7 @@ public class IndexTest extends ObjectDBBaseTest {
     database.getMetadata().getSchema().createClass("ManualIndexTxClass");
 
     OIndexManager idxManager = db.getMetadata().getIndexManager();
-    idxManager.createIndex("manualTxIndexTest", "UNIQUE", new OSimpleKeyIndexDefinition(OType.INTEGER), null, null, null);
+    idxManager.createIndex("manualTxIndexTest", "UNIQUE", new OSimpleKeyIndexDefinition(-1, OType.INTEGER), null, null, null);
     OIndex<OIdentifiable> idx = (OIndex<OIdentifiable>) idxManager.getIndex("manualTxIndexTest");
 
     ODocument v0 = new ODocument("ManualIndexTxClass");
@@ -1111,8 +1111,8 @@ public class IndexTest extends ObjectDBBaseTest {
     database.getMetadata().getSchema().createClass("ManualIndexTxRecursiveStoreClass");
 
     OIndexManager idxManager = db.getMetadata().getIndexManager();
-    idxManager.createIndex("manualTxIndexRecursiveStoreTest", "UNIQUE", new OSimpleKeyIndexDefinition(OType.INTEGER), null, null,
-        null);
+    idxManager.createIndex("manualTxIndexRecursiveStoreTest", "UNIQUE", new OSimpleKeyIndexDefinition(-1, OType.INTEGER), null,
+        null, null);
 
     OIndex<OIdentifiable> idx = (OIndex<OIdentifiable>) idxManager.getIndex("manualTxIndexRecursiveStoreTest");
 
@@ -1156,7 +1156,8 @@ public class IndexTest extends ObjectDBBaseTest {
 
   public void testIndexCountPlusCondition() {
     OIndexManager idxManager = database.getMetadata().getIndexManager();
-    idxManager.createIndex("IndexCountPlusCondition", "NOTUNIQUE", new OSimpleKeyIndexDefinition(OType.INTEGER), null, null, null);
+    idxManager.createIndex("IndexCountPlusCondition", "NOTUNIQUE", new OSimpleKeyIndexDefinition(-1, OType.INTEGER), null, null,
+        null);
 
     final OIndex<OIdentifiable> idx = (OIndex<OIdentifiable>) idxManager.getIndex("IndexCountPlusCondition");
 
@@ -1184,7 +1185,7 @@ public class IndexTest extends ObjectDBBaseTest {
 
   public void testNotUniqueIndexKeySize() {
     OIndexManager idxManager = database.getMetadata().getIndexManager();
-    idxManager.createIndex("IndexNotUniqueIndexKeySize", "NOTUNIQUE", new OSimpleKeyIndexDefinition(OType.INTEGER), null, null,
+    idxManager.createIndex("IndexNotUniqueIndexKeySize", "NOTUNIQUE", new OSimpleKeyIndexDefinition(-1, OType.INTEGER), null, null,
         null);
 
     final OIndex<OIdentifiable> idx = (OIndex<OIdentifiable>) idxManager.getIndex("IndexNotUniqueIndexKeySize");
@@ -1206,7 +1207,8 @@ public class IndexTest extends ObjectDBBaseTest {
 
   public void testNotUniqueIndexSize() {
     OIndexManager idxManager = database.getMetadata().getIndexManager();
-    idxManager.createIndex("IndexNotUniqueIndexSize", "NOTUNIQUE", new OSimpleKeyIndexDefinition(OType.INTEGER), null, null, null);
+    idxManager.createIndex("IndexNotUniqueIndexSize", "NOTUNIQUE", new OSimpleKeyIndexDefinition(-1, OType.INTEGER), null, null,
+        null);
 
     final OIndex<OIdentifiable> idx = (OIndex<OIdentifiable>) idxManager.getIndex("IndexNotUniqueIndexSize");
 
@@ -1334,7 +1336,7 @@ public class IndexTest extends ObjectDBBaseTest {
     }
 
     List<ODocument> result = databaseDocumentTx.query(new OSQLSynchQuery<ODocument>(
-        "select from index:IndexPaginationTest limit 5 order by key"));
+        "select from index:IndexPaginationTest order by key limit 5"));
 
     Assert.assertEquals(result.size(), 5);
 
@@ -1353,7 +1355,7 @@ public class IndexTest extends ObjectDBBaseTest {
 
     while (true) {
       result = databaseDocumentTx.query(new OSQLSynchQuery<ODocument>(
-          "select from index:IndexPaginationTest where key > ? limit 5  order by key"), new OCompositeKey(lastKey, lastRid));
+          "select from index:IndexPaginationTest where key > ? order by key limit 5"), new OCompositeKey(lastKey, lastRid));
       if (result.isEmpty())
         break;
 
@@ -1393,7 +1395,7 @@ public class IndexTest extends ObjectDBBaseTest {
     }
 
     List<ODocument> result = databaseDocumentTx.query(new OSQLSynchQuery<ODocument>(
-        "select from index:IndexPaginationTestDescOrder limit 5 order by key desc"));
+        "select from index:IndexPaginationTestDescOrder order by key desc limit 5"));
 
     Assert.assertEquals(result.size(), 5);
 
@@ -1412,7 +1414,7 @@ public class IndexTest extends ObjectDBBaseTest {
 
     while (true) {
       result = databaseDocumentTx.query(new OSQLSynchQuery<ODocument>(
-          "select from index:IndexPaginationTestDescOrder where key < ? limit 5  order by key desc"), new OCompositeKey(lastKey,
+          "select from index:IndexPaginationTestDescOrder where key < ? order by key desc limit 5"), new OCompositeKey(lastKey,
           lastRid));
       if (result.isEmpty())
         break;
@@ -1740,7 +1742,8 @@ public class IndexTest extends ObjectDBBaseTest {
     OClass emptyNotUniqueIndexClazz = database.getMetadata().getSchema().createClass("EmptyNotUniqueIndexTest");
     emptyNotUniqueIndexClazz.createProperty("prop", OType.STRING);
 
-    final OIndex notUniqueIndex = emptyNotUniqueIndexClazz.createIndex("EmptyNotUniqueIndexTestIndex", INDEX_TYPE.NOTUNIQUE_HASH_INDEX, "prop");
+    final OIndex notUniqueIndex = emptyNotUniqueIndexClazz.createIndex("EmptyNotUniqueIndexTestIndex",
+        INDEX_TYPE.NOTUNIQUE_HASH_INDEX, "prop");
     ODocument document = new ODocument("EmptyNotUniqueIndexTest");
     document.field("prop", "keyOne");
     document.save();

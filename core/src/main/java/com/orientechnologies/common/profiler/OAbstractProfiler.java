@@ -24,8 +24,6 @@ import com.orientechnologies.common.concur.resource.OSharedResourceAbstract;
 import com.orientechnologies.common.io.OFileUtils;
 import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.common.util.OPair;
-import com.orientechnologies.orient.core.OOrientListener;
-import com.orientechnologies.orient.core.OOrientListenerAbstract;
 import com.orientechnologies.orient.core.OOrientStartupListener;
 import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
@@ -54,6 +52,7 @@ public abstract class OAbstractProfiler extends OSharedResourceAbstract implemen
   protected final ConcurrentHashMap<String, String>        dictionary    = new ConcurrentHashMap<String, String>();
   protected final ConcurrentHashMap<String, METRIC_TYPE>   types         = new ConcurrentHashMap<String, METRIC_TYPE>();
   protected final ConcurrentHashMap<String, AtomicInteger> tips          = new ConcurrentHashMap<String, AtomicInteger>();
+  protected final ConcurrentHashMap<String, Long>          tipsTimestamp = new ConcurrentHashMap<String, Long>();
   protected long                                           recordingFrom = -1;
 
   public interface OProfilerHookValue {
@@ -63,7 +62,6 @@ public abstract class OAbstractProfiler extends OSharedResourceAbstract implemen
   private static final class MemoryChecker extends TimerTask {
     @Override
     public void run() {
-      final java.lang.management.OperatingSystemMXBean mxBean = ManagementFactory.getOperatingSystemMXBean();
       final long jvmTotMemory = Runtime.getRuntime().totalMemory();
       final long jvmMaxMemory = Runtime.getRuntime().maxMemory();
 
@@ -172,9 +170,10 @@ public abstract class OAbstractProfiler extends OSharedResourceAbstract implemen
       OLogManager.instance().info(this, "[TIP] " + iMessage);
 
       tips.put(iMessage, new AtomicInteger(1));
+      tipsTimestamp.put(iMessage, System.currentTimeMillis());
       return 1;
     }
-
+    tipsTimestamp.put(iMessage, System.currentTimeMillis());
     return counter.incrementAndGet();
   }
 

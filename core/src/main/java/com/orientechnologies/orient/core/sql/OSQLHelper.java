@@ -1,24 +1,25 @@
 /*
-  *
-  *  *  Copyright 2014 Orient Technologies LTD (info(at)orientechnologies.com)
-  *  *
-  *  *  Licensed under the Apache License, Version 2.0 (the "License");
-  *  *  you may not use this file except in compliance with the License.
-  *  *  You may obtain a copy of the License at
-  *  *
-  *  *       http://www.apache.org/licenses/LICENSE-2.0
-  *  *
-  *  *  Unless required by applicable law or agreed to in writing, software
-  *  *  distributed under the License is distributed on an "AS IS" BASIS,
-  *  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  *  *  See the License for the specific language governing permissions and
-  *  *  limitations under the License.
-  *  *
-  *  * For more information: http://www.orientechnologies.com
-  *
-  */
+ *
+ *  *  Copyright 2014 Orient Technologies LTD (info(at)orientechnologies.com)
+ *  *
+ *  *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  *  you may not use this file except in compliance with the License.
+ *  *  You may obtain a copy of the License at
+ *  *
+ *  *       http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *  Unless required by applicable law or agreed to in writing, software
+ *  *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *  See the License for the specific language governing permissions and
+ *  *  limitations under the License.
+ *  *
+ *  * For more information: http://www.orientechnologies.com
+ *
+ */
 package com.orientechnologies.orient.core.sql;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -32,7 +33,6 @@ import com.orientechnologies.common.parser.OBaseParser;
 import com.orientechnologies.orient.core.command.OCommandContext;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
-import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.metadata.schema.OProperty;
 import com.orientechnologies.orient.core.metadata.schema.OType;
@@ -64,6 +64,23 @@ public class OSQLHelper {
   public static final String DEFINED           = "_DEFINED_";
 
   private static ClassLoader orientClassLoader = OSQLFilterItemAbstract.class.getClassLoader();
+
+  public static Object parseDefaultValue(ODocument iRecord, final String iWord) {
+    final Object v = OSQLHelper.parseValue(iWord, null);
+
+    if (v != VALUE_NOT_PARSED) {
+      return v;
+    }
+
+    // TRY TO PARSE AS FUNCTION
+    final OSQLFunctionRuntime func = OSQLHelper.getFunction(null, iWord);
+    if (func != null) {
+      return func.execute(iRecord, iRecord, null, null);
+    }
+
+    // PARSE AS FIELD
+    return new OSQLFilterItemField(null, iWord);
+  }
 
   /**
    * Convert fields from text to real value. Supports: String, RID, Boolean, Float, Integer and NULL.
@@ -122,7 +139,7 @@ public class OSQLHelper {
       fieldValue = new OCommandSQL(iValue.substring(1, iValue.length() - 1));
       ((OCommandSQL) fieldValue).getContext().setParent(iContext);
 
-    } else if (iValue.charAt(0) == ORID.PREFIX)
+    } else if (ORecordId.isA(iValue))
       // RID
       fieldValue = new ORecordId(iValue.trim());
     else {
@@ -167,6 +184,8 @@ public class OSQLHelper {
       return Byte.parseByte(iValue);
     else if (t == OType.DOUBLE)
       return Double.parseDouble(iValue);
+    else if (t == OType.DECIMAL)
+      return new BigDecimal(iValue);
     else if (t == OType.DATE || t == OType.DATETIME)
       return new Date(Long.parseLong(iValue));
 
@@ -215,7 +234,8 @@ public class OSQLHelper {
     if (beginParenthesis > -1 && (separator == -1 || separator > beginParenthesis)) {
       final int endParenthesis = iWord.indexOf(OStringSerializerHelper.EMBEDDED_END, beginParenthesis);
 
-      if (endParenthesis > -1 && Character.isLetter(iWord.charAt(0)))
+      final char firstChar = iWord.charAt(0);
+      if (endParenthesis > -1 && (firstChar == '_' || Character.isLetter(firstChar)))
         // FUNCTION: CREATE A RUN-TIME CONTAINER FOR IT TO SAVE THE PARAMETERS
         return new OSQLFunctionRuntime(iCommand, iWord);
     }

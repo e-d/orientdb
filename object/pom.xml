@@ -26,7 +26,7 @@
     <parent>
         <groupId>com.orientechnologies</groupId>
         <artifactId>orientdb-parent</artifactId>
-        <version>2.0</version>
+        <version>2.1-rc1</version>
     </parent>
 
     <artifactId>orientdb-object</artifactId>
@@ -97,7 +97,7 @@
                 <configuration>
                     <argLine>-ea -Xmx2048m -Dstorage.makeFullCheckpointAfterCreate=false -Dstorage.makeFullCheckpointAfterOpen=false
                         -Dstorage.makeFullCheckpointAfterClusterCreate=false -Dstorage.wal.syncOnPageFlush=false
-                        -Dstorage.configuration.syncOnUpdate=false
+                        -Dstorage.configuration.syncOnUpdate=false -Ddb.makeFullCheckpointOnIndexChange=false -Ddb.makeFullCheckpointOnSchemaChange=false
                     </argLine>
                     <systemPropertyVariables>
                         <buildDirectory>${project.build.directory}</buildDirectory>

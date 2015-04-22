@@ -19,18 +19,19 @@
  */
 package com.orientechnologies.orient.core.serialization.serializer.record.string;
 
-import java.io.IOException;
-import java.io.StringWriter;
-import java.text.ParseException;
-import java.util.*;
-
 import com.orientechnologies.common.collection.OMultiValue;
 import com.orientechnologies.common.parser.OStringParser;
+import com.orientechnologies.common.util.OCommonConst;
 import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.OUserObject2RecordHandler;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
-import com.orientechnologies.orient.core.db.record.*;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.db.record.ORecordLazyList;
+import com.orientechnologies.orient.core.db.record.ORecordLazyMultiValue;
+import com.orientechnologies.orient.core.db.record.ORecordLazySet;
+import com.orientechnologies.orient.core.db.record.OTrackedList;
+import com.orientechnologies.orient.core.db.record.OTrackedSet;
 import com.orientechnologies.orient.core.db.record.ridbag.ORidBag;
 import com.orientechnologies.orient.core.exception.OSerializationException;
 import com.orientechnologies.orient.core.fetch.OFetchHelper;
@@ -54,6 +55,16 @@ import com.orientechnologies.orient.core.serialization.serializer.OJSONWriter;
 import com.orientechnologies.orient.core.serialization.serializer.OStringSerializerHelper;
 import com.orientechnologies.orient.core.util.ODateHelper;
 
+import java.io.IOException;
+import java.io.StringWriter;
+import java.text.ParseException;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 @SuppressWarnings("serial")
 public class ORecordSerializerJSON extends ORecordSerializerStringAbstract {
 
@@ -71,7 +82,7 @@ public class ORecordSerializerJSON extends ORecordSerializerStringAbstract {
     void visitItem(Object item);
   }
 
-  public class FormatSettings {
+  public static class FormatSettings {
     public boolean includeVer;
     public boolean includeType;
     public boolean includeId;
@@ -232,7 +243,7 @@ public class ORecordSerializerJSON extends ORecordSerializerStringAbstract {
           } else if (fieldName.equals("value") && !(iRecord instanceof ODocument)) {
             // RECORD VALUE(S)
             if ("null".equals(fieldValue))
-              iRecord.fromStream(new byte[] {});
+              iRecord.fromStream(OCommonConst.EMPTY_BYTE_ARRAY);
             else if (iRecord instanceof ORecordBytes) {
               // BYTES
               iRecord.fromStream(OBase64Utils.decode(fieldValueAsString));
@@ -430,7 +441,7 @@ public class ORecordSerializerJSON extends ORecordSerializerStringAbstract {
 
           if (c == null && !iFieldValue.isEmpty()) {
             // TRY TO AUTODETERMINE THE BEST TYPE
-            if (iFieldValue.charAt(0) == ORID.PREFIX && iFieldValue.contains(":"))
+            if (ORecordId.isA(iFieldValue))
               iType = OType.LINK;
             else if (OStringSerializerHelper.contains(iFieldValue, '.')) {
               // DECIMAL FORMAT: DETERMINE IF DOUBLE OR FLOAT
@@ -454,19 +465,8 @@ public class ORecordSerializerJSON extends ORecordSerializerStringAbstract {
       } else if (iFieldValue.startsWith("{") && iFieldValue.endsWith("}"))
         iType = OType.EMBEDDED;
       else {
-        if (iFieldValueAsString.length() >= 4 && iFieldValueAsString.charAt(0) == ORID.PREFIX && iFieldValueAsString.contains(":")) {
-          // IS IT A LINK?
-          final List<String> parts = OStringSerializerHelper.split(iFieldValueAsString, 1, -1, ':');
-          if (parts.size() == 2)
-            try {
-              Short.parseShort(parts.get(0));
-              // YES, IT'S A LINK
-              if (parts.get(1).matches("\\d+")) {
-                iType = OType.LINK;
-              }
-            } catch (Exception ignored) {
-            }
-        }
+        if (ORecordId.isA(iFieldValueAsString))
+          iType = OType.LINK;
 
         if (iFieldTypes != null) {
           Character c = iFieldTypes.get(iFieldName);

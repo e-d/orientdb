@@ -52,15 +52,7 @@ import com.orientechnologies.orient.core.sql.query.OSQLAsynchQuery;
 import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
 import com.orientechnologies.orient.core.storage.OStorage;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Executes a TRAVERSE crossing records. Returns a List<OIdentifiable> containing all the traversed records that match the WHERE
@@ -93,6 +85,7 @@ public abstract class OCommandExecutorSQLResultsetAbstract extends OCommandExecu
   protected Iterator<? extends OIdentifiable> target;
   protected Iterable<OIdentifiable>           tempResult;
   protected int                               resultCount;
+  protected int                               serialTempRID      = 0;
   protected int                               skip               = 0;
 
   private static final class IndexValuesIterator implements Iterator<OIdentifiable> {
@@ -401,6 +394,7 @@ public abstract class OCommandExecutorSQLResultsetAbstract extends OCommandExecu
           subQuery.reset();
           subQuery.resetPagination();
           subQuery.getContext().setParent(context);
+          subQuery.getContext().setVariable("parentQuery", this);
           subQuery.getContext().setVariable("current", iRecord);
           varValue = ODatabaseRecordThreadLocal.INSTANCE.get().query(subQuery);
           if (varValue instanceof OResultSet) {
@@ -431,9 +425,14 @@ public abstract class OCommandExecutorSQLResultsetAbstract extends OCommandExecu
 
   protected void searchInClasses(final boolean iAscendentOrder) {
     final OClass cls = parsedTarget.getTargetClasses().keySet().iterator().next();
+    target = searchInClasses(cls, true, iAscendentOrder);
+  }
+
+  protected Iterator<? extends OIdentifiable> searchInClasses(final OClass iCls, final boolean iPolymorphic,
+      final boolean iAscendentOrder) {
 
     final ODatabaseDocumentInternal database = getDatabase();
-    database.checkSecurity(ORule.ResourceGeneric.CLASS, ORole.PERMISSION_READ, cls.getName().toLowerCase());
+    database.checkSecurity(ORule.ResourceGeneric.CLASS, ORole.PERMISSION_READ, iCls.getName().toLowerCase());
 
     // NO INDEXES: SCAN THE ENTIRE CLUSTER
 
@@ -442,11 +441,11 @@ public abstract class OCommandExecutorSQLResultsetAbstract extends OCommandExecu
 
     final ORID[] range = getRange();
     if (iAscendentOrder)
-      target = new ORecordIteratorClass<ORecord>(database, database, cls.getName(), true, request.isUseCache(), false, locking)
-          .setRange(range[0], range[1]);
+      return new ORecordIteratorClass<ORecord>(database, database, iCls.getName(), iPolymorphic, request.isUseCache(), false,
+          locking).setRange(range[0], range[1]);
     else
-      target = new ORecordIteratorClassDescendentOrder<ORecord>(database, database, cls.getName(), true, request.isUseCache(),
-          false, locking).setRange(range[0], range[1]);
+      return new ORecordIteratorClassDescendentOrder<ORecord>(database, database, iCls.getName(), iPolymorphic,
+          request.isUseCache(), false, locking).setRange(range[0], range[1]);
   }
 
   protected void searchInClusters() {
@@ -632,5 +631,17 @@ public abstract class OCommandExecutorSQLResultsetAbstract extends OCommandExecu
     }
 
     return new ORID[] { beginRange, endRange };
+  }
+
+  public void setRequest(OSQLAsynchQuery<ODocument> request) {
+    this.request = request;
+  }
+
+  public void setParsedTarget(OSQLTarget parsedTarget) {
+    this.parsedTarget = parsedTarget;
+  }
+
+  public void setCompiledFilter(OSQLFilter compiledFilter) {
+    this.compiledFilter = compiledFilter;
   }
 }

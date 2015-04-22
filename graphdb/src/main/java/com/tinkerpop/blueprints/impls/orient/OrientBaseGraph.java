@@ -20,6 +20,20 @@
 
 package com.tinkerpop.blueprints.impls.orient;
 
+import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Set;
+
+import org.apache.commons.configuration.Configuration;
+
 import com.orientechnologies.common.exception.OException;
 import com.orientechnologies.common.io.OFileUtils;
 import com.orientechnologies.common.log.OLogManager;
@@ -38,10 +52,7 @@ import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
-import com.orientechnologies.orient.core.index.OCompositeKey;
-import com.orientechnologies.orient.core.index.OIndex;
-import com.orientechnologies.orient.core.index.OIndexManager;
-import com.orientechnologies.orient.core.index.OPropertyIndexDefinition;
+import com.orientechnologies.orient.core.index.*;
 import com.orientechnologies.orient.core.intent.OIntent;
 import com.orientechnologies.orient.core.metadata.OMetadataInternal;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
@@ -63,23 +74,10 @@ import com.tinkerpop.blueprints.Vertex;
 import com.tinkerpop.blueprints.util.ExceptionFactory;
 import com.tinkerpop.blueprints.util.StringFactory;
 import com.tinkerpop.blueprints.util.wrappers.partition.PartitionVertex;
-import org.apache.commons.configuration.Configuration;
-
-import java.io.UnsupportedEncodingException;
-import java.net.URLDecoder;
-import java.net.URLEncoder;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Deque;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Set;
 
 /**
  * A Blueprints implementation of the graph database OrientDB (http://www.orientechnologies.com)
- * 
+ *
  * @author Luca Garulli (http://www.orientechnologies.com)
  */
 public abstract class OrientBaseGraph extends OrientConfigurableGraph implements OrientExtendedGraph {
@@ -95,6 +93,7 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
                                                                                       return new LinkedList<OrientBaseGraph>();
                                                                                     }
                                                                                   };
+
   static {
     Orient.instance().registerListener(new OOrientListenerAbstract() {
       @Override
@@ -117,6 +116,7 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
       }
     });
   }
+
   private final OPartitionedDatabasePool                      pool;
   protected ODatabaseDocumentTx                               database;
   private String                                              url;
@@ -511,7 +511,7 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
    * Creates a new unconnected vertex with no fields in the Graph.
    *
    * @param id
-   *          Optional, can contains the Edge's class name by prefixing with "class:"
+   *          Optional, can contains the Vertex's class name by prefixing with "class:"
    * @return The new OrientVertex created
    */
   @Override
@@ -545,7 +545,7 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
    * (Blueprints Extension) Creates a new unconnected vertex in the Graph setting the initial field values.
    *
    * @param id
-   *          Optional, can contains the Edge's class name by prefixing with "class:"
+   *          Optional, can contains the Vertex's class name by prefixing with "class:"
    * @param prop
    *          Fields must be a odd pairs of key/value or a single object as Map containing entries as key/value pairs
    * @return The new OrientVertex created
@@ -582,7 +582,7 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
     autoStartTransaction();
 
     final OrientVertex vertex = new OrientVertex(this, className, fields);
-    vertex.setProperties(prop);
+    vertex.setPropertiesInternal(prop);
 
     // SAVE IT
     if (clusterName != null)
@@ -634,7 +634,7 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
     autoStartTransaction();
 
     final OrientVertex vertex = new OrientVertex(this, iClassName);
-    vertex.setProperties(prop);
+    vertex.setPropertiesInternal(prop);
     return vertex;
   }
 
@@ -808,7 +808,7 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
 
   /**
    * Get all the Vertices in Graph filtering by field name and value. Example:<code>
-   *   Iterable<Vertex> resultset = getVertices("name", "Jay");
+   * Iterable<Vertex> resultset = getVertices("name", "Jay");
    * </code>
    *
    * @param iKey
@@ -868,7 +868,7 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
   /**
    * Lookup for a vertex by id using an index.<br>
    * Example:<code>
-   *   Vertex v = getVertexByIndex("V.name", "name", "Jay");
+   * Vertex v = getVertexByIndex("V.name", "name", "Jay");
    * </code>
    *
    * @param iKey
@@ -900,7 +900,7 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
 
   /**
    * Get all the Vertices in Graph filtering by field name and value. Example:<code>
-   *   Iterable<Vertex> resultset = getVertices("Person",new String[] {"name","surname"},new Object[] { "Sherlock" ,"Holmes"});
+   * Iterable<Vertex> resultset = getVertices("Person",new String[] {"name","surname"},new Object[] { "Sherlock" ,"Holmes"});
    * </code>
    *
    * @param iKey
@@ -988,7 +988,7 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
 
   /**
    * Get all the Edges in Graph filtering by field name and value. Example:<code>
-   *   Iterable<Edges> resultset = getEdges("name", "Jay");
+   * Iterable<Edges> resultset = getEdges("name", "Jay");
    * </code>
    *
    * @param iKey
@@ -1128,10 +1128,17 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
    * Closes the Graph. After closing the Graph cannot be used.
    */
   public void shutdown(boolean closeDb) {
+    shutdown(closeDb, true);
+  }
+
+  /**
+   * Closes the Graph. After closing the Graph cannot be used.
+   */
+  public void shutdown(boolean closeDb, boolean commitTx) {
     makeActive();
 
     try {
-      if (!database.isClosed()) {
+      if (!database.isClosed() && commitTx) {
         final OStorage storage = database.getStorage();
         if (storage instanceof OAbstractPaginatedStorage) {
           if (((OAbstractPaginatedStorage) storage).getWALInstance() != null)
@@ -1539,10 +1546,12 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
         if (property != null)
           keyType = property.getType();
 
+        OIndexFactory factory = OIndexes.getFactory(indexType, null);
         db.getMetadata()
             .getIndexManager()
-            .createIndex(className + "." + key, indexType, new OPropertyIndexDefinition(className, key, keyType),
-                cls.getPolymorphicClusterIds(), null, metadata);
+            .createIndex(className + "." + key, indexType,
+                new OPropertyIndexDefinition(className, key, keyType, factory.getLastVersion()), cls.getPolymorphicClusterIds(),
+                null, metadata);
         return null;
 
       }
@@ -1639,9 +1648,7 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
    * @return Long as number of total vertices
    */
   public long countVertices() {
-    makeActive();
-
-    return getRawGraph().countClass(OrientVertexType.CLASS_NAME);
+    return countVertices(OrientVertexType.CLASS_NAME);
   }
 
   /**
@@ -1661,12 +1668,7 @@ public abstract class OrientBaseGraph extends OrientConfigurableGraph implements
    * @return Long as number of total edges
    */
   public long countEdges() {
-    makeActive();
-
-    if (isUseLightweightEdges())
-      throw new UnsupportedOperationException("Graph set to use Lightweight Edges, count against edges is not supported");
-
-    return getRawGraph().countClass(OrientEdgeType.CLASS_NAME);
+    return countEdges(OrientEdgeType.CLASS_NAME);
   }
 
   /**
