@@ -164,6 +164,10 @@ public class OObjectDatabaseTx extends ODatabasePojoAbstract<Object> implements 
         RET enhanced = (RET) OObjectEntityEnhancer.getInstance()
             .getProxiedInstance(entityManager.getEntityClass(iClassName), iEnclosingClass, underlying.newInstance(iClassName), null,
                 iArgs);
+        if (enhanced == null) {
+          throw new OSerializationException("Type " + iClassName
+            + " cannot be serialized because an instance cannot be created. You need a public no-argument constructor.");
+        }
         return (RET) enhanced;
       } else {
         throw new OSerializationException("Type " + iClassName

@@ -146,6 +146,8 @@ public class OObjectEntitySerializer {
       throw OException.wrapException(new OSerializationException("Error serializing object of class " + o.getClass()), e);
     } catch (IllegalAccessException e) {
       throw OException.wrapException(new OSerializationException("Error serializing object of class " + o.getClass()), e);
+    } catch (Throwable e) {
+      throw OException.wrapException(new OSerializationException("Error serializing object of class " + o.getClass()), e);
     }
   }
 
