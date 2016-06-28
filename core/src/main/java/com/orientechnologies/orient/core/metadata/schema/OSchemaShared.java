@@ -1,22 +1,22 @@
 /*
-  *
-  *  *  Copyright 2014 Orient Technologies LTD (info(at)orientechnologies.com)
-  *  *
-  *  *  Licensed under the Apache License, Version 2.0 (the "License");
-  *  *  you may not use this file except in compliance with the License.
-  *  *  You may obtain a copy of the License at
-  *  *
-  *  *       http://www.apache.org/licenses/LICENSE-2.0
-  *  *
-  *  *  Unless required by applicable law or agreed to in writing, software
-  *  *  distributed under the License is distributed on an "AS IS" BASIS,
-  *  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  *  *  See the License for the specific language governing permissions and
-  *  *  limitations under the License.
-  *  *
-  *  * For more information: http://www.orientechnologies.com
-  *
-  */
+ *
+ *  *  Copyright 2014 Orient Technologies LTD (info(at)orientechnologies.com)
+ *  *
+ *  *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  *  you may not use this file except in compliance with the License.
+ *  *  You may obtain a copy of the License at
+ *  *
+ *  *       http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *  Unless required by applicable law or agreed to in writing, software
+ *  *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *  See the License for the specific language governing permissions and
+ *  *  limitations under the License.
+ *  *
+ *  * For more information: http://www.orientechnologies.com
+ *
+ */
 package com.orientechnologies.orient.core.metadata.schema;
 
 import com.orientechnologies.common.concur.lock.OReadersWriterSpinLock;
@@ -166,14 +166,14 @@ public class OSchemaShared extends ODocumentWrapperNoClass
     if (snapshot == null) {
       // Is null only in the case that is asked while the schema is created
       // all the other cases are already protected by a write lock
-    acquireSchemaReadLock();
-    try {
+      acquireSchemaReadLock();
+      try {
         if (snapshot == null)
           snapshot = new OImmutableSchema(this);
-    } finally {
-      releaseSchemaReadLock();
+      } finally {
+        releaseSchemaReadLock();
+      }
     }
-  }
     return snapshot;
   }
 
@@ -204,22 +204,22 @@ public class OSchemaShared extends ODocumentWrapperNoClass
 
     while (true)
       try {
-    acquireSchemaWriteLock();
-    try {
+        acquireSchemaWriteLock();
+        try {
           // TODO: revisit this logic: interfaces should be also taken into concederation
           // TODO: Remove code duplication of this kind!
-      final Class<?> superClass = clazz.getSuperclass();
-      final OClass cls;
-      if (superClass != null && superClass != Object.class && existsClass(superClass.getSimpleName()))
-        cls = getClass(superClass.getSimpleName());
-      else
-        cls = null;
+          final Class<?> superClass = clazz.getSuperclass();
+          final OClass cls;
+          if (superClass != null && superClass != Object.class && existsClass(superClass.getSimpleName()))
+            cls = getClass(superClass.getSimpleName());
+          else
+            cls = null;
 
           result = doCreateClass(clazz.getSimpleName(), clusterIds, retry, cls);
           break;
-    } finally {
-      releaseSchemaWriteLock();
-    }
+        } finally {
+          releaseSchemaWriteLock();
+        }
 
       } catch (ClusterIdsAreEmptyException e) {
         clusterIds = createClusters(clazz.getSimpleName());
@@ -238,20 +238,20 @@ public class OSchemaShared extends ODocumentWrapperNoClass
 
     while (true)
       try {
-    acquireSchemaWriteLock();
-    try {
+        acquireSchemaWriteLock();
+        try {
           // TODO: revisit this logic: interfaces should be also taken into concederation
-      final Class<?> superClass = clazz.getSuperclass();
-      final OClass cls;
-      if (superClass != null && superClass != Object.class && existsClass(superClass.getSimpleName()))
-        cls = getClass(superClass.getSimpleName());
-      else
-        cls = null;
+          final Class<?> superClass = clazz.getSuperclass();
+          final OClass cls;
+          if (superClass != null && superClass != Object.class && existsClass(superClass.getSimpleName()))
+            cls = getClass(superClass.getSimpleName());
+          else
+            cls = null;
 
           result = doCreateClass(clazz.getSimpleName(), clusterIds, retry, cls);
-    } finally {
-      releaseSchemaWriteLock();
-    }
+        } finally {
+          releaseSchemaWriteLock();
+        }
 
         break;
       } catch (ClusterIdsAreEmptyException e) {
@@ -318,21 +318,21 @@ public class OSchemaShared extends ODocumentWrapperNoClass
 
     while (true)
       try {
-    acquireSchemaWriteLock();
-    try {
+        acquireSchemaWriteLock();
+        try {
           cls = classes.get(iClassName.toLowerCase());
-      if (cls != null)
-        return cls;
+          if (cls != null)
+            return cls;
 
           cls = doCreateClass(iClassName, clusterIds, retry, superClasses);
           // TODO: revisit this exception
           // if (superClass != null && !cls.isSubClassOf(superClass))
           // throw new IllegalArgumentException("Class '" + iClassName + "' is not an instance of " + superClass.getShortName());
 
-      addClusterClassMap(cls);
-    } finally {
-      releaseSchemaWriteLock();
-    }
+          addClusterClassMap(cls);
+        } finally {
+          releaseSchemaWriteLock();
+        }
         break;
       } catch (ClusterIdsAreEmptyException e) {
         clusterIds = createClusters(iClassName);
@@ -350,18 +350,18 @@ public class OSchemaShared extends ODocumentWrapperNoClass
 
     while (true)
       try {
-    acquireSchemaWriteLock();
-    try {
+        acquireSchemaWriteLock();
+        try {
           // TODO: revisit this logic: interfaces should be also taken into concederation
-      final Class<?> superClass = iClass.getSuperclass();
-      if (superClass != null && superClass != Object.class && existsClass(superClass.getSimpleName()))
-        cls = getClass(superClass.getSimpleName());
-      else
-        cls = null;
+          final Class<?> superClass = iClass.getSuperclass();
+          if (superClass != null && superClass != Object.class && existsClass(superClass.getSimpleName()))
+            cls = getClass(superClass.getSimpleName());
+          else
+            cls = null;
           cls = doCreateClass(iClass.getSimpleName(), clusterIds, retry, cls);
-    } finally {
-      releaseSchemaWriteLock();
-    }
+        } finally {
+          releaseSchemaWriteLock();
+        }
 
         break;
       } catch (ClusterIdsAreEmptyException e) {
@@ -403,7 +403,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass
     int retry = 0;
 
     while (true)
-    try {
+      try {
         result = doCreateClass(className, clusterIds, retry, superClasses);
         break;
       } catch (ClusterIdsAreEmptyException e) {
@@ -595,8 +595,8 @@ public class OSchemaShared extends ODocumentWrapperNoClass
    * @see com.orientechnologies.orient.core.metadata.schema.OSchema#getClass(java.lang.String)
    */
   public OClass getClass(final String iClassName) {
-      if (iClassName == null)
-        return null;
+    if (iClassName == null)
+      return null;
 
     acquireSchemaReadLock();
     try {
@@ -604,7 +604,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass
     } finally {
       releaseSchemaReadLock();
     }
-        }
+  }
 
   public void acquireSchemaReadLock() {
     rwSpinLock.acquireReadLock();
@@ -631,9 +631,9 @@ public class OSchemaShared extends ODocumentWrapperNoClass
 
         if (iSave)
           if (getDatabase().getStorage().getUnderlying() instanceof OAbstractPaginatedStorage)
-          saveInternal();
-        else
-          reload();
+            saveInternal();
+          else
+            reload();
         else
           snapshot = new OImmutableSchema(this);
 
@@ -768,7 +768,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass
             superClasses.add(superClass);
           }
           cls.setSuperClassesInternal(superClasses);
-      }
+        }
       }
 
       if (!hasGlobalProperties) {
@@ -885,7 +885,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass
   @Deprecated
   public int getVersion() {
     return version;
-    }
+  }
 
   public ORID getIdentity() {
     acquireSchemaReadLock();
@@ -1106,7 +1106,6 @@ public class OSchemaShared extends ODocumentWrapperNoClass
                 database.getMetadata().getIndexManager().addClusterToIndex(clusterName, index.getName());
         }
       }
-      }
 
       addClusterClassMap(cls);
 
@@ -1208,17 +1207,17 @@ public class OSchemaShared extends ODocumentWrapperNoClass
     OScenarioThreadLocal.executeAsDistributed(new Callable<Object>() {
       @Override
       public Object call() {
-    try {
+        try {
           toStream();
           document.save(OMetadataDefault.CLUSTER_INTERNAL_NAME);
-      if (fullCheckpointOnChange)
-        getDatabase().getStorage().synch();
-    } catch (OConcurrentModificationException e) {
-      reload(null, true);
-      throw e;
-    }
+          if (fullCheckpointOnChange)
+            getDatabase().getStorage().synch();
+        } catch (OConcurrentModificationException e) {
+          reload(null, true);
+          throw e;
+        }
         return null;
-  }
+      }
     });
 
     snapshot = new OImmutableSchema(this);

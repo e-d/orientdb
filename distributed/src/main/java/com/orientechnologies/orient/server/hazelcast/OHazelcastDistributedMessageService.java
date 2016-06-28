@@ -28,7 +28,6 @@ import java.util.Set;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentHashMap;
 
-import com.hazelcast.collection.impl.queue.QueueService;
 import com.hazelcast.config.QueueConfig;
 import com.hazelcast.core.DistributedObject;
 import com.hazelcast.core.HazelcastException;
@@ -36,6 +35,7 @@ import com.hazelcast.core.HazelcastInstanceNotActiveException;
 import com.hazelcast.core.IAtomicLong;
 import com.hazelcast.core.IQueue;
 import com.hazelcast.monitor.LocalQueueStats;
+import com.hazelcast.queue.impl.QueueService;
 import com.hazelcast.spi.exception.DistributedObjectDestroyedException;
 import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;

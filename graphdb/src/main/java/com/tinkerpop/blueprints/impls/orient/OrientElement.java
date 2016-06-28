@@ -20,6 +20,14 @@
 
 package com.tinkerpop.blueprints.impls.orient;
 
+import java.io.Externalizable;
+import java.io.IOException;
+import java.io.ObjectInput;
+import java.io.ObjectOutput;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Map;
+
 import com.orientechnologies.common.collection.OMultiValue;
 import com.orientechnologies.common.util.OCallable;
 import com.orientechnologies.common.util.OPair;
@@ -44,15 +52,6 @@ import com.tinkerpop.blueprints.Element;
 import com.tinkerpop.blueprints.util.ElementHelper;
 import com.tinkerpop.blueprints.util.ExceptionFactory;
 import com.tinkerpop.blueprints.util.StringFactory;
-
-import javax.ws.rs.HEAD;
-import java.io.Externalizable;
-import java.io.IOException;
-import java.io.ObjectInput;
-import java.io.ObjectOutput;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Map;
 
 /**
  * Base Graph Element where OrientVertex and OrientEdge classes extends from. Labels are managed as OrientDB classes.

@@ -1,22 +1,22 @@
 /*
-  *
-  *  *  Copyright 2014 Orient Technologies LTD (info(at)orientechnologies.com)
-  *  *
-  *  *  Licensed under the Apache License, Version 2.0 (the "License");
-  *  *  you may not use this file except in compliance with the License.
-  *  *  You may obtain a copy of the License at
-  *  *
-  *  *       http://www.apache.org/licenses/LICENSE-2.0
-  *  *
-  *  *  Unless required by applicable law or agreed to in writing, software
-  *  *  distributed under the License is distributed on an "AS IS" BASIS,
-  *  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  *  *  See the License for the specific language governing permissions and
-  *  *  limitations under the License.
-  *  *
-  *  * For more information: http://www.orientechnologies.com
-  *
-  */
+ *
+ *  *  Copyright 2014 Orient Technologies LTD (info(at)orientechnologies.com)
+ *  *
+ *  *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  *  you may not use this file except in compliance with the License.
+ *  *  You may obtain a copy of the License at
+ *  *
+ *  *       http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *  Unless required by applicable law or agreed to in writing, software
+ *  *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *  See the License for the specific language governing permissions and
+ *  *  limitations under the License.
+ *  *
+ *  * For more information: http://www.orientechnologies.com
+ *
+ */
 
 package com.orientechnologies.orient.core.storage.impl.local;
 
@@ -705,7 +705,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
     final OCluster cluster = getClusterById(rid.clusterId);
 
     if (transaction.get() != null) {
-    final long timer = Orient.instance().getProfiler().startChrono();
+      final long timer = Orient.instance().getProfiler().startChrono();
       try {
         return doCreateRecord(rid, content, recordVersion, recordType, callback, cluster, ppos);
       } finally {
@@ -866,7 +866,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
 
     final OCluster cluster = getClusterById(rid.clusterId);
     if (transaction.get() != null) {
-    final long timer = Orient.instance().getProfiler().startChrono();
+      final long timer = Orient.instance().getProfiler().startChrono();
       try {
         return doUpdateRecord(rid, updateContent, content, version, recordType, callback, cluster);
       } finally {
@@ -920,7 +920,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
     final OCluster cluster = getClusterById(rid.clusterId);
 
     if (transaction.get() != null) {
-    final long timer = Orient.instance().getProfiler().startChrono();
+      final long timer = Orient.instance().getProfiler().startChrono();
       try {
         return doDeleteRecord(rid, version, cluster);
       } finally {
@@ -960,7 +960,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
     final OCluster cluster = getClusterById(rid.clusterId);
 
     if (transaction.get() != null) {
-    final long timer = Orient.instance().getProfiler().startChrono();
+      final long timer = Orient.instance().getProfiler().startChrono();
       try {
         return doHideMethod(rid, cluster);
       } finally {
@@ -1065,18 +1065,18 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
           checkOpeness();
 
           if (writeAheadLog == null && clientTx.isUsingLog())
-          throw new OStorageException("WAL mode is not active. Transactions are not supported in given mode");
+            throw new OStorageException("WAL mode is not active. Transactions are not supported in given mode");
 
-        makeStorageDirty();
-        startStorageTx(clientTx);
+          makeStorageDirty();
+          startStorageTx(clientTx);
 
-        final List<ORecordOperation> tmpEntries = new ArrayList<ORecordOperation>();
+          final List<ORecordOperation> tmpEntries = new ArrayList<ORecordOperation>();
 
-        while (clientTx.getCurrentRecordEntries().iterator().hasNext()) {
-          for (ORecordOperation txEntry : clientTx.getCurrentRecordEntries())
-            tmpEntries.add(txEntry);
+          while (clientTx.getCurrentRecordEntries().iterator().hasNext()) {
+            for (ORecordOperation txEntry : clientTx.getCurrentRecordEntries())
+              tmpEntries.add(txEntry);
 
-          clientTx.clearRecordEntries();
+            clientTx.clearRecordEntries();
 
             for (ORecordOperation txEntry : tmpEntries) {
               if (txEntry.type == ORecordOperation.CREATED || txEntry.type == ORecordOperation.UPDATED) {
@@ -1085,18 +1085,18 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
                   ((ODocument) record).validate();
               }
             }
-          for (ORecordOperation txEntry : tmpEntries)
-            // COMMIT ALL THE SINGLE ENTRIES ONE BY ONE
-            commitEntry(clientTx, txEntry);
+            for (ORecordOperation txEntry : tmpEntries)
+              // COMMIT ALL THE SINGLE ENTRIES ONE BY ONE
+              commitEntry(clientTx, txEntry);
 
-        }
+          }
 
-        if (callback != null)
-          callback.run();
+          if (callback != null)
+            callback.run();
 
-        endStorageTx();
+          endStorageTx();
 
-        OTransactionAbstract.updateCacheFromEntries(clientTx, clientTx.getAllRecordEntries(), true);
+          OTransactionAbstract.updateCacheFromEntries(clientTx, clientTx.getAllRecordEntries(), true);
 
         } catch (Exception e) {
           // WE NEED TO CALL ROLLBACK HERE, IN THE LOCK
@@ -1118,7 +1118,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
 
     } finally {
       stateLock.releaseReadLock();
-  }
+    }
   }
 
   public void rollback(final OTransaction clientTx) {
@@ -1455,8 +1455,8 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
               .stopChrono("db." + ODatabaseRecordThreadLocal.INSTANCE.get().getName() + ".command." + iCommand.toString(),
                   "Command executed against the database", beginTime, "db.*.command.*", null, userString);
         }
+      }
     }
-  }
   }
 
   @Override
@@ -1741,7 +1741,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
           "Cannot read record " + rid + " since the position is invalid in database '" + name + '\'');
 
     if (transaction.get() != null) {
-    final long timer = Orient.instance().getProfiler().startChrono();
+      final long timer = Orient.instance().getProfiler().startChrono();
       try {
         return doReadRecordIfNotLatest(cluster, rid, recordVersion);
       } finally {
@@ -1829,7 +1829,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
     if (storageTx != null && storageTx.getClientTx().getId() != clientTx.getId())
       rollback(clientTx);
 
-		assert atomicOperationsManager.getCurrentOperation() == null;
+    assert atomicOperationsManager.getCurrentOperation() == null;
 
     transaction.set(new OStorageTransaction(clientTx));
     try {
@@ -1837,7 +1837,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
     } catch (RuntimeException e) {
       transaction.set(null);
       throw e;
-  }
+    }
   }
 
   private void rollbackStorageTx() throws IOException {
@@ -2317,7 +2317,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
         return strategy.onUpdate(this, iRecordType, rid, version, iRecordContent, iDatabaseVersion);
       } else
         // OK, INCREMENT DB VERSION
-      iDatabaseVersion.increment();
+        iDatabaseVersion.increment();
     }
 
     return null;
@@ -2579,7 +2579,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
       flushedLsn = writeAheadLog.begin();
 
     return restoreFrom(flushedLsn);
-        }
+  }
 
   private boolean restoreFromBegging() throws IOException {
     OLogManager.instance().info(this, "Data restore procedure is started.");
@@ -2608,7 +2608,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
           if (atomicUnit != null) {
             atomicUnit.add(walRecord);
             restoreAtomicUnit(atomicUnit, atLeastOnePageUpdate);
-        }
+          }
 
         } else if (walRecord instanceof OAtomicUnitStartRecord) {
           List<OWALRecord> operationList = new ArrayList<OWALRecord>();
@@ -2750,8 +2750,8 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
       } else if (walRecord instanceof OUpdatePageRecord) {
         final OUpdatePageRecord updatePageRecord = (OUpdatePageRecord) walRecord;
 
-          final long fileId = updatePageRecord.getFileId();
-          final long pageIndex = updatePageRecord.getPageIndex();
+        final long fileId = updatePageRecord.getFileId();
+        final long pageIndex = updatePageRecord.getPageIndex();
 
         if (!writeCache.isOpen(fileId))
           readCache.openFile(fileId, writeCache);
@@ -2766,11 +2766,11 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
           } while (cacheEntry.getPageIndex() != pageIndex);
         }
 
-          final OCachePointer cachePointer = cacheEntry.getCachePointer();
-          cachePointer.acquireExclusiveLock();
-          try {
+        final OCachePointer cachePointer = cacheEntry.getCachePointer();
+        cachePointer.acquireExclusiveLock();
+        try {
           ODurablePage durablePage = new ODurablePage(cacheEntry, null);
-            durablePage.restoreChanges(updatePageRecord.getChanges());
+          durablePage.restoreChanges(updatePageRecord.getChanges());
           durablePage.setLsn(updatePageRecord.getLsn());
         } finally {
           cachePointer.releaseExclusiveLock();
@@ -2787,9 +2787,9 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
             .error(this, "Invalid WAL record type was passed %s. Given record will be skipped.", walRecord.getClass());
 
         assert false : "Invalid WAL record type was passed " + walRecord.getClass().getName();
+      }
     }
   }
-      }
 
   private void checkLowDiskSpaceAndFullCheckpointRequests() {
     if (transaction.get() != null)
@@ -2812,16 +2812,16 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
                   + "Required space is now set to " + OGlobalConfiguration.DISK_CACHE_FREE_SPACE_LIMIT.getValueAsInteger()
                   + "MB (you can change it by setting parameter " + OGlobalConfiguration.DISK_CACHE_FREE_SPACE_LIMIT.getKey()
                   + ") .");
-        } else {
-          lowDiskSpace = null;
+            } else {
+              lowDiskSpace = null;
             }
-      } else
-        lowDiskSpace = null;
+          } else
+            lowDiskSpace = null;
         } finally {
           checkpointInProgress.set(false);
         }
       }
-}
+    }
 
     if (checkpointRequest && writeAheadLog instanceof ODiskWriteAheadLog) {
       if (checkpointInProgress.compareAndSet(false, true)) {
