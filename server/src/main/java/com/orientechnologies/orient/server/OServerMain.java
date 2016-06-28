@@ -19,25 +19,88 @@
  */
 package com.orientechnologies.orient.server;
 
-public class OServerMain {
-  private static OServer instance;
+import java.io.IOException;
+import java.nio.channels.Selector;
 
+import com.orientechnologies.common.log.OLogManager;
+
+public class OServerMain {
+  private OServer server;
+  private static OServerMain instance;
+  private static Selector serviceStopPreventionSelector;
+  
+  static {
+    instance = new OServerMain();
+  }
+  
   public static OServer create() throws Exception {
-    instance = new OServer();
-    return instance;
+    instance.server = new OServer();
+    return instance.server;
   }
 
   public static OServer create(boolean shutdownEngineOnExit) throws Exception {
-    instance = new OServer(shutdownEngineOnExit);
-    return instance;
+    instance.server = new OServer(shutdownEngineOnExit);
+    return instance.server;
   }
 
   public static OServer server() {
-    return instance;
+    return instance.server;
   }
 
-  public static void main(final String[] args) throws Exception {
-    instance = OServerMain.create();
-    instance.startup().activate();
+  public static void main(final String[] args) {
+    try {
+      // To enable use of OrientDB by Apache Commons Daemon, we need to check arguments.
+      if (args != null && args.length > 0 && args[0].equalsIgnoreCase("stop")) {
+        shutdown();
+      } else {
+        // Assume "start" otherwise.
+        OLogManager.instance().info(instance, "Creating server...");
+        instance.server = OServerMain.create();
+        instance.server.startup().activate();
+        preventServiceStop();
+      }
+    } catch (Throwable t) {
+      OLogManager.instance().error(instance, "Failed to start server.", t);
+      t.printStackTrace();
+    }
+  }
+  
+  /**
+   * Called by the "stop" function of Apache Commons Daemon.
+   */
+  private static void shutdown() {
+    OLogManager.instance().info(instance, "Shutdown service request received...");
+    instance.server.shutdown();
+    enableServiceStop();
+  }
+
+  /**
+   * To make OrientDB compatible with Apache Commons Daemon (to be a Windows service), we have to keep the main 
+   * method from returning. Waiting for a selector action seems to do the trick.
+   * 
+   * @throws IOException
+   */
+  private static void preventServiceStop() {
+    OLogManager.instance().info(instance, "Preventing JVM from exiting by waiting for selector action...");
+    int exitInput = 0;
+    try {
+      serviceStopPreventionSelector = Selector.open();
+      exitInput = serviceStopPreventionSelector.select(); // Blocks until wakeup is called.
+    } catch (Exception e) {
+      OLogManager.instance().error(instance, "Couldn't wait for selector wakeup.", e);
+    }
+    OLogManager.instance().info(instance, "Selector returned with code: " + exitInput + ".");
+  }
+  
+  /**
+   * To make OrientDB compatible with Apache Commons Daemon (to be a Windows service), we have to keep the main 
+   * method from returning. This wakes up a selector to make the main method return.
+   * 
+   * @throws IOException
+   */
+  private static void enableServiceStop() {
+    OLogManager.instance().info(instance, "Re-enabling JVM exit by waking up the selector...");
+    serviceStopPreventionSelector.wakeup();
+    OLogManager.instance().info(instance, "Selector has been awoken.");
   }
 }
