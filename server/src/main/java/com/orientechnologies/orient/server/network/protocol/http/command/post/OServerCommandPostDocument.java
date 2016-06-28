@@ -45,13 +45,14 @@ public class OServerCommandPostDocument extends OServerCommandDocumentAbstract {
        db = getProfiledDatabaseInstance(iRequest);
 
        doc = new ODocument().fromJSON(iRequest.content);
+       doc.getRecordVersion().reset();
 
        // ASSURE TO MAKE THE RECORD ID INVALID
        ((ORecordId) doc.getIdentity()).clusterPosition = ORID.CLUSTER_POS_INVALID;
 
        doc.save();
 
-       iResponse.send(OHttpUtils.STATUS_CREATED_CODE, OHttpUtils.STATUS_CREATED_DESCRIPTION, OHttpUtils.CONTENT_TEXT_PLAIN,
+       iResponse.send(OHttpUtils.STATUS_CREATED_CODE, OHttpUtils.STATUS_CREATED_DESCRIPTION, OHttpUtils.CONTENT_JSON,
            doc.toJSON(), OHttpUtils.HEADER_ETAG + doc.getVersion());
 
      } finally {

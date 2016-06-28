@@ -2,6 +2,7 @@ package com.orientechnologies.orient.test.database.auto;
 
 import com.orientechnologies.orient.client.db.ODatabaseHelper;
 import com.orientechnologies.orient.core.db.ODatabase;
+import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.object.db.OObjectDatabaseTx;
@@ -17,17 +18,47 @@ import java.io.IOException;
 
 @Test
 public abstract class BaseTest<T extends ODatabase> {
+
+  private static boolean keepDatabase = Boolean.getBoolean("orientdb.test.keepDatabase");
+
+  public static String prepareUrl(String url) {
+    if (url != null)
+      return url;
+
+    String storageType;
+    final String config = System.getProperty("orientdb.test.env");
+    if ("ci".equals(config) || "release".equals(config))
+      storageType = "plocal";
+    else
+      storageType = System.getProperty("storageType");
+
+    if (storageType == null)
+      storageType = "memory";
+
+    if ("remote".equals(storageType))
+      return storageType + ":localhost/demo";
+    else {
+      final String buildDirectory = System.getProperty("buildDirectory", ".");
+      return storageType + ":" + buildDirectory + "/test-db/demo";
+    }
+  }
+
   protected T      database;
   protected String url;
-  private boolean  dropDb = false;
+  private boolean  dropDb             = false;
   private String   storageType;
+  private boolean  autoManageDatabase = true;
 
   protected BaseTest() {
   }
 
   @Parameters(value = "url")
   public BaseTest(@Optional String url) {
-    storageType = System.getProperty("storageType");
+    String config = System.getProperty("orientdb.test.env");
+    if ("ci".equals(config) || "release".equals(config))
+      storageType = "plocal";
+    else
+      storageType = System.getProperty("storageType");
 
     if (storageType == null)
       storageType = "memory";
@@ -35,12 +66,18 @@ public abstract class BaseTest<T extends ODatabase> {
     if (url == null) {
       if ("remote".equals(storageType)) {
         url = getStorageType() + ":localhost/demo";
-        dropDb = true;
+        dropDb = !keepDatabase;
       } else {
         final String buildDirectory = System.getProperty("buildDirectory", ".");
         url = getStorageType() + ":" + buildDirectory + "/test-db/demo";
-        dropDb = true;
+        dropDb = !keepDatabase;
       }
+    }
+
+    if (!url.startsWith("remote:")) {
+      final ODatabaseDocumentTx db = new ODatabaseDocumentTx(url);
+      if (!db.exists())
+        db.create().close();
     }
 
     this.url = url;
@@ -48,12 +85,27 @@ public abstract class BaseTest<T extends ODatabase> {
 
   @Parameters(value = "url")
   public BaseTest(@Optional String url, String prefix) {
+    String config = System.getProperty("orientdb.test.env");
+    if ("ci".equals(config) || "release".equals(config))
+      storageType = "plocal";
+    else
+      storageType = System.getProperty("storageType");
+
+    if (storageType == null)
+      storageType = "memory";
+
     if (url == null) {
       final String buildDirectory = System.getProperty("buildDirectory", ".");
       url = getStorageType() + ":" + buildDirectory + "/test-db/demo" + prefix;
-      dropDb = true;
+      dropDb = !keepDatabase;
     } else
       url = url + prefix;
+
+    if (!url.startsWith("remote:")) {
+      final ODatabaseDocumentTx db = new ODatabaseDocumentTx(url);
+      if (!db.exists())
+        db.create().close();
+    }
 
     this.url = url;
   }
@@ -82,6 +134,9 @@ public abstract class BaseTest<T extends ODatabase> {
 
   @AfterClass
   public void afterClass() throws Exception {
+    if( !autoManageDatabase )
+      return;
+
     if (dropDb) {
       if (database.isClosed())
         database.open("admin", "admin");
@@ -92,21 +147,31 @@ public abstract class BaseTest<T extends ODatabase> {
 
       ODatabaseHelper.dropDatabase(database, remoteStorageType);
     } else {
-      if (!database.isClosed())
+      if (!database.isClosed()) {
+        database.activateOnCurrentThread();
         database.close();
+      }
     }
   }
 
   @BeforeMethod
   public void beforeMethod() throws Exception {
+    if (!autoManageDatabase)
+      return;
+
     if (database.isClosed())
       database.open("admin", "admin");
   }
 
   @AfterMethod
   public void afterMethod() throws Exception {
-    if (!database.isClosed())
+    if (!autoManageDatabase)
+      return;
+
+    if (!database.isClosed()) {
+      database.activateOnCurrentThread();
       database.close();
+    }
   }
 
   protected abstract T createDatabaseInstance(String url);
@@ -164,5 +229,21 @@ public abstract class BaseTest<T extends ODatabase> {
     OClass animal = database.getMetadata().getSchema().createClass("Animal");
     animal.createProperty("races", OType.LINKSET, animalRace);
     animal.createProperty("name", OType.STRING);
+  }
+
+  protected boolean isAutoManageDatabase() {
+    return autoManageDatabase;
+  }
+
+  protected void setAutoManageDatabase(final boolean autoManageDatabase) {
+    this.autoManageDatabase = autoManageDatabase;
+  }
+
+  protected boolean isDropDb() {
+    return dropDb;
+  }
+
+  protected void setDropDb(final boolean dropDb) {
+    this.dropDb = !keepDatabase && dropDb;
   }
 }

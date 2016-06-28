@@ -25,7 +25,11 @@ import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -35,10 +39,9 @@ import java.util.concurrent.TimeoutException;
  * SQL asynchronous query. When executed the caller does not wait for the execution, rather the listener will be called for each
  * item found in the query. OSQLAsynchQuery has been built on top of this. NOTE: if you're working with remote databases don't
  * execute any remote call inside the callback function because the network channel is locked until the query command has finished.
- * 
- * @author Luca Garulli
- * 
+ *
  * @param <T>
+ * @author Luca Garulli
  * @see com.orientechnologies.orient.core.sql.query.OSQLSynchQuery
  */
 public class OSQLNonBlockingQuery<T extends Object> extends OSQLQuery<T> implements OCommandRequestAsynch {
@@ -235,18 +238,29 @@ public class OSQLNonBlockingQuery<T extends Object> extends OSQLQuery<T> impleme
   @Override
   public <RET> RET execute(final Object... iArgs) {
     final ODatabaseDocumentInternal database = ODatabaseRecordThreadLocal.INSTANCE.get();
-    final ODatabaseDocumentTx db = ((ODatabaseDocumentTx) database).copy();
 
     final ONonBlockingQueryFuture future = new ONonBlockingQueryFuture();
 
     if (database instanceof ODatabaseDocumentTx) {
+      ODatabaseDocumentInternal currentThreadLocal = ODatabaseRecordThreadLocal.INSTANCE.getIfDefined();
+      final ODatabaseDocumentTx db = ((ODatabaseDocumentTx) database).copy();
+      if (currentThreadLocal != null) {
+        currentThreadLocal.activateOnCurrentThread();
+      } else {
+        ODatabaseRecordThreadLocal.INSTANCE.set(null);
+      }
+
       Thread t = new Thread(new Runnable() {
         @Override
         public void run() {
-
+          db.activateOnCurrentThread();
           try {
-            db.setCurrentDatabaseInThreadLocal();
             OSQLNonBlockingQuery.super.execute(iArgs);
+          } catch (RuntimeException e) {
+            if (getResultListener() != null) {
+              getResultListener().end();
+            }
+            throw e;
           } finally {
             if (db != null) {
               try {

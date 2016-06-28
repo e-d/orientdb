@@ -19,10 +19,12 @@
  */
 package com.orientechnologies.orient.core.sql;
 
+import com.orientechnologies.common.util.OPair;
 import com.orientechnologies.orient.core.command.OCommandDistributedReplicateRequest;
 import com.orientechnologies.orient.core.command.OCommandRequest;
 import com.orientechnologies.orient.core.command.OCommandRequestText;
 import com.orientechnologies.orient.core.command.OCommandResultListener;
+import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
@@ -35,6 +37,7 @@ import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.serialization.serializer.OStringSerializerHelper;
 import com.orientechnologies.orient.core.sql.filter.OSQLFilterItemField;
 import com.orientechnologies.orient.core.sql.query.OSQLAsynchQuery;
+import com.orientechnologies.orient.core.storage.OCluster;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -68,9 +71,9 @@ public class OCommandExecutorSQLInsert extends OCommandExecutorSQLSetAware imple
     String queryText = textRequest.getText();
     String originalQuery = queryText;
     try {
-//      System.out.println("NEW PARSER FROM: " + queryText);
+      // System.out.println("NEW PARSER FROM: " + queryText);
       queryText = preParse(queryText, iRequest);
-//      System.out.println("NEW PARSER   TO: " + queryText);
+      // System.out.println("NEW PARSER   TO: " + queryText);
       textRequest.setText(queryText);
 
       final ODatabaseDocument database = getDatabase();
@@ -119,6 +122,17 @@ public class OCommandExecutorSQLInsert extends OCommandExecutorSQLSetAware imple
           throw new OQueryParsingException("Class '" + className + "' was not found");
       }
 
+      if(clusterName != null && className == null){
+        ODatabaseDocumentInternal db = getDatabase();
+        OCluster cluster = db.getStorage().getClusterByName(clusterName);
+        if(cluster != null){
+          clazz = db.getMetadata().getSchema().getClassByClusterId(cluster.getId());
+          if(clazz != null){
+            className = clazz.getName();
+          }
+        }
+      }
+
       parserSkipWhiteSpaces();
       if (parserIsEnded())
         throwSyntaxErrorException("Set of fields is missed. Example: (name, surname) or SET name = 'Bill'");
@@ -147,9 +161,11 @@ public class OCommandExecutorSQLInsert extends OCommandExecutorSQLSetAware imple
           parseContent();
           sourceClauseProcessed = true;
         } else if (parserGetLastWord().equals(KEYWORD_SET)) {
-          final LinkedHashMap<String, Object> fields = new LinkedHashMap<String, Object>();
-          newRecords.add(fields);
+          final List<OPair<String, Object>> fields = new ArrayList<OPair<String, Object>>();
           parseSetFields(clazz, fields);
+
+          newRecords.add(OPair.convertToMap(fields));
+
           sourceClauseProcessed = true;
         }
       }
@@ -409,6 +425,11 @@ public class OCommandExecutorSQLInsert extends OCommandExecutorSQLSetAware imple
         return (OIdentifiable) commandParameters.getByName(f.getRoot().substring(1));
     }
     return (OIdentifiable) parsedRid;
+  }
+
+  @Override
+  public QUORUM_TYPE getQuorumType() {
+    return QUORUM_TYPE.WRITE;
   }
 
 }

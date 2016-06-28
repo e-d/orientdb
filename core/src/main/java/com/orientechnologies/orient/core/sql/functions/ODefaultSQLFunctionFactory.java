@@ -15,10 +15,15 @@
  */
 package com.orientechnologies.orient.core.sql.functions;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
 import com.orientechnologies.orient.core.sql.functions.coll.*;
 import com.orientechnologies.orient.core.sql.functions.geo.OSQLFunctionDistance;
 import com.orientechnologies.orient.core.sql.functions.math.OSQLFunctionAverage;
+import com.orientechnologies.orient.core.sql.functions.math.OSQLFunctionDecimal;
 import com.orientechnologies.orient.core.sql.functions.math.OSQLFunctionEval;
 import com.orientechnologies.orient.core.sql.functions.math.OSQLFunctionMax;
 import com.orientechnologies.orient.core.sql.functions.math.OSQLFunctionMin;
@@ -40,10 +45,6 @@ import com.orientechnologies.orient.core.sql.functions.stat.OSQLFunctionVariance
 import com.orientechnologies.orient.core.sql.functions.text.OSQLFunctionConcat;
 import com.orientechnologies.orient.core.sql.functions.text.OSQLFunctionFormat;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
-
 /**
  * Default set of SQL function.
  * 
@@ -60,12 +61,13 @@ public final class ODefaultSQLFunctionFactory implements OSQLFunctionFactory {
     register(OSQLFunctionDate.NAME, OSQLFunctionDate.class);
     register(OSQLFunctionDecode.NAME, new OSQLFunctionDecode());
     register(OSQLFunctionDifference.NAME, OSQLFunctionDifference.class);
+    register(OSQLFunctionSymmetricDifference.NAME, OSQLFunctionSymmetricDifference.class);
     register(OSQLFunctionDistance.NAME, new OSQLFunctionDistance());
     register(OSQLFunctionDistinct.NAME, OSQLFunctionDistinct.class);
     register(OSQLFunctionDocument.NAME, OSQLFunctionDocument.class);
     register(OSQLFunctionEncode.NAME, new OSQLFunctionEncode());
     register(OSQLFunctionEval.NAME, OSQLFunctionEval.class);
-    register(OSQLFunctionFirst.NAME, OSQLFunctionFirst.class);
+    register(OSQLFunctionFirst.NAME, new OSQLFunctionFirst());
     register(OSQLFunctionFormat.NAME, new OSQLFunctionFormat());
     register(OSQLFunctionTraversedEdge.NAME, OSQLFunctionTraversedEdge.class);
     register(OSQLFunctionTraversedElement.NAME, OSQLFunctionTraversedElement.class);
@@ -73,7 +75,7 @@ public final class ODefaultSQLFunctionFactory implements OSQLFunctionFactory {
     register(OSQLFunctionIf.NAME, new OSQLFunctionIf());
     register(OSQLFunctionIfNull.NAME, new OSQLFunctionIfNull());
     register(OSQLFunctionIntersect.NAME, OSQLFunctionIntersect.class);
-    register(OSQLFunctionLast.NAME, OSQLFunctionLast.class);
+    register(OSQLFunctionLast.NAME, new OSQLFunctionLast());
     register(OSQLFunctionList.NAME, OSQLFunctionList.class);
     register(OSQLFunctionMap.NAME, OSQLFunctionMap.class);
     register(OSQLFunctionMax.NAME, OSQLFunctionMax.class);
@@ -89,6 +91,7 @@ public final class ODefaultSQLFunctionFactory implements OSQLFunctionFactory {
     register(OSQLFunctionStandardDeviation.NAME, OSQLFunctionStandardDeviation.class);
     register(OSQLFunctionUUID.NAME, OSQLFunctionUUID.class);
     register(OSQLFunctionConcat.NAME, OSQLFunctionConcat.class);
+    register(OSQLFunctionDecimal.NAME, OSQLFunctionDecimal.class);
   }
 
   public static void register(final String iName, final Object iImplementation) {

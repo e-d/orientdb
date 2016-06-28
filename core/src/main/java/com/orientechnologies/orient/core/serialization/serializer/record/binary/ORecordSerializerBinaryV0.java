@@ -23,12 +23,8 @@ package com.orientechnologies.orient.core.serialization.serializer.record.binary
 import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Date;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.Set;
 
 import com.orientechnologies.common.collection.OMultiValue;
 import com.orientechnologies.common.serialization.types.ODecimalSerializer;
@@ -37,8 +33,10 @@ import com.orientechnologies.common.serialization.types.OLongSerializer;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.db.record.ORecordElement;
 import com.orientechnologies.orient.core.db.record.ORecordLazyList;
 import com.orientechnologies.orient.core.db.record.ORecordLazyMap;
+import com.orientechnologies.orient.core.db.record.ORecordLazyMultiValue;
 import com.orientechnologies.orient.core.db.record.ORecordLazySet;
 import com.orientechnologies.orient.core.db.record.OTrackedList;
 import com.orientechnologies.orient.core.db.record.OTrackedMap;
@@ -46,6 +44,7 @@ import com.orientechnologies.orient.core.db.record.OTrackedSet;
 import com.orientechnologies.orient.core.db.record.ridbag.ORidBag;
 import com.orientechnologies.orient.core.exception.ODatabaseException;
 import com.orientechnologies.orient.core.exception.OSerializationException;
+import com.orientechnologies.orient.core.exception.OValidationException;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
@@ -61,6 +60,7 @@ import com.orientechnologies.orient.core.serialization.ODocumentSerializable;
 import com.orientechnologies.orient.core.serialization.OSerializableStream;
 import com.orientechnologies.orient.core.serialization.serializer.ONetworkThreadLocalSerializer;
 import com.orientechnologies.orient.core.storage.OStorageProxy;
+import com.orientechnologies.orient.core.storage.impl.local.paginated.ORecordSerializationContext;
 import com.orientechnologies.orient.core.type.tree.OMVRBTreeRIDSet;
 import com.orientechnologies.orient.core.util.ODateHelper;
 
@@ -273,12 +273,12 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
     return clazz;
   }
 
-  private OGlobalProperty getGlobalProperty(final ODocument document, final int len) {
+  protected OGlobalProperty getGlobalProperty(final ODocument document, final int len) {
     final int id = (len * -1) - 1;
     return ODocumentInternal.getGlobalPropertyById(document, id);
   }
 
-  private OType readOType(final BytesContainer bytes) {
+  protected OType readOType(final BytesContainer bytes) {
     return OType.getById(readByte(bytes));
   }
 
@@ -286,7 +286,7 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
     bytes.bytes[pos] = (byte) type.getId();
   }
 
-  private Object readSingleValue(BytesContainer bytes, OType type, ODocument document) {
+  protected Object readSingleValue(BytesContainer bytes, OType type, ODocument document) {
     Object value = null;
     switch (type) {
     case INTEGER:
@@ -318,8 +318,8 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
       break;
     case DATE:
       long savedTime = OVarIntSerializer.readAsLong(bytes) * MILLISEC_PER_DAY;
-      int offset = ODateHelper.getDatabaseTimeZone().getOffset(savedTime);
-      value = new Date(savedTime - offset);
+      savedTime = convertDayToTimezone(TimeZone.getTimeZone("GMT"),ODateHelper.getDatabaseTimeZone(), savedTime);
+      value = new Date(savedTime);
       break;
     case EMBEDDED:
       value = new ODocument();
@@ -405,54 +405,69 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
 
   private Map<Object, OIdentifiable> readLinkMap(final BytesContainer bytes, final ODocument document) {
     int size = OVarIntSerializer.readAsInteger(bytes);
-    Map<Object, OIdentifiable> result = new ORecordLazyMap(document);
-    while ((size--) > 0) {
-      OType keyType = readOType(bytes);
-      Object key = readSingleValue(bytes, keyType, document);
-      ORecordId value = readOptimizedLink(bytes);
-      if (value.equals(NULL_RECORD_ID))
-        result.put(key, null);
-      else
-        result.put(key, value);
+    ORecordLazyMap result = new ORecordLazyMap(document);
+    result.setInternalStatus(ORecordElement.STATUS.UNMARSHALLING);
+    try {
+      while ((size--) > 0) {
+        OType keyType = readOType(bytes);
+        Object key = readSingleValue(bytes, keyType, document);
+        ORecordId value = readOptimizedLink(bytes);
+        if (value.equals(NULL_RECORD_ID))
+          result.put(key, null);
+        else
+          result.put(key, value);
+      }
+      return result;
+    } finally {
+      result.setInternalStatus(ORecordElement.STATUS.LOADED);
     }
-    return result;
   }
 
   private Object readEmbeddedMap(final BytesContainer bytes, final ODocument document) {
     int size = OVarIntSerializer.readAsInteger(bytes);
-    final Map<Object, Object> result = new OTrackedMap<Object>(document);
-    int last = 0;
-    while ((size--) > 0) {
-      OType keyType = readOType(bytes);
-      Object key = readSingleValue(bytes, keyType, document);
-      final int valuePos = readInteger(bytes);
-      final OType type = readOType(bytes);
-      if (valuePos != 0) {
-        int headerCursor = bytes.offset;
-        bytes.offset = valuePos;
-        Object value = readSingleValue(bytes, type, document);
-        if (bytes.offset > last)
-          last = bytes.offset;
-        bytes.offset = headerCursor;
-        result.put(key, value);
-      } else
-        result.put(key, null);
+    final OTrackedMap<Object> result = new OTrackedMap<Object>(document);
+    result.setInternalStatus(ORecordElement.STATUS.UNMARSHALLING);
+    try {
+      int last = 0;
+      while ((size--) > 0) {
+        OType keyType = readOType(bytes);
+        Object key = readSingleValue(bytes, keyType, document);
+        final int valuePos = readInteger(bytes);
+        final OType type = readOType(bytes);
+        if (valuePos != 0) {
+          int headerCursor = bytes.offset;
+          bytes.offset = valuePos;
+          Object value = readSingleValue(bytes, type, document);
+          if (bytes.offset > last)
+            last = bytes.offset;
+          bytes.offset = headerCursor;
+          result.put(key, value);
+        } else
+          result.put(key, null);
+      }
+      if (last > bytes.offset)
+        bytes.offset = last;
+      return result;
+    } finally {
+      result.setInternalStatus(ORecordElement.STATUS.LOADED);
     }
-    if (last > bytes.offset)
-      bytes.offset = last;
-    return result;
   }
 
   private Collection<OIdentifiable> readLinkCollection(BytesContainer bytes, Collection<OIdentifiable> found) {
-    final int items = OVarIntSerializer.readAsInteger(bytes);
-    for (int i = 0; i < items; i++) {
-      ORecordId id = readOptimizedLink(bytes);
-      if (id.equals(NULL_RECORD_ID))
-        found.add(null);
-      else
-        found.add(id);
+    ((ORecordElement)found).setInternalStatus(ORecordElement.STATUS.UNMARSHALLING);
+    try {
+      final int items = OVarIntSerializer.readAsInteger(bytes);
+      for (int i = 0; i < items; i++) {
+        ORecordId id = readOptimizedLink(bytes);
+        if (id.equals(NULL_RECORD_ID))
+          found.add(null);
+        else
+          found.add(id);
+      }
+      return found;
+    } finally {
+      ((ORecordElement)found).setInternalStatus(ORecordElement.STATUS.LOADED);
     }
-    return found;
   }
 
   private ORecordId readOptimizedLink(final BytesContainer bytes) {
@@ -464,14 +479,19 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
     OType type = readOType(bytes);
 
     if (type == OType.ANY) {
-      for (int i = 0; i < items; i++) {
-        OType itemType = readOType(bytes);
-        if (itemType == OType.ANY)
-          found.add(null);
-        else
-          found.add(readSingleValue(bytes, itemType, document));
+      ((ORecordElement)found).setInternalStatus(ORecordElement.STATUS.UNMARSHALLING);
+      try {
+        for (int i = 0; i < items; i++) {
+          OType itemType = readOType(bytes);
+          if (itemType == OType.ANY)
+            found.add(null);
+          else
+            found.add(readSingleValue(bytes, itemType, document));
+        }
+        return found;
+      } finally {
+        ((ORecordElement)found).setInternalStatus(ORecordElement.STATUS.LOADED);
       }
-      return found;
     }
     // TODO: manage case where type is known
     return null;
@@ -480,9 +500,9 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
   private OType getLinkedType(ODocument document, OType type, String key) {
     if (type != OType.EMBEDDEDLIST && type != OType.EMBEDDEDSET && type != OType.EMBEDDEDMAP)
       return null;
-    OClass clazz = ODocumentInternal.getImmutableSchemaClass(document);
-    if (clazz != null) {
-      OProperty prop = clazz.getProperty(key);
+    OClass immutableClass = ODocumentInternal.getImmutableSchemaClass(document);
+    if (immutableClass != null) {
+      OProperty prop = immutableClass.getProperty(key);
       if (prop != null) {
         return prop.getLinkedType();
       }
@@ -491,7 +511,7 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
   }
 
   @SuppressWarnings("unchecked")
-  private int writeSingleValue(BytesContainer bytes, Object value, OType type, OType linkedType) {
+  private int writeSingleValue(final BytesContainer bytes, Object value, final OType type, final OType linkedType) {
     int pointer = 0;
     switch (type) {
     case INTEGER:
@@ -532,8 +552,8 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
         dateValue = (Long) value;
       } else
         dateValue = ((Date) value).getTime();
-      int offset = ODateHelper.getDatabaseTimeZone().getOffset(dateValue);
-      pointer = OVarIntSerializer.write(bytes, (dateValue + offset) / MILLISEC_PER_DAY);
+      dateValue = convertDayToTimezone(ODateHelper.getDatabaseTimeZone(),TimeZone.getTimeZone("GMT"),dateValue);
+      pointer = OVarIntSerializer.write(bytes, dateValue / MILLISEC_PER_DAY);
       break;
     case EMBEDDED:
       pointer = bytes.offset;
@@ -566,6 +586,9 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
       pointer = writeLinkCollection(bytes, ridCollection);
       break;
     case LINK:
+      if (!(value instanceof OIdentifiable))
+        throw new OValidationException("Value '" + value + "' is not a OIdentifiable");
+
       pointer = writeOptimizedLink(bytes, (OIdentifiable) value);
       break;
     case LINKMAP:
@@ -591,10 +614,9 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
     return pointer;
   }
 
-  private int writeBinary(BytesContainer bytes, byte[] valueBytes) {
-    int pointer;
-    pointer = OVarIntSerializer.write(bytes, valueBytes.length);
-    int start = bytes.alloc(valueBytes.length);
+  private int writeBinary(final BytesContainer bytes, final byte[] valueBytes) {
+    final int pointer = OVarIntSerializer.write(bytes, valueBytes.length);
+    final int start = bytes.alloc(valueBytes.length);
     System.arraycopy(valueBytes, 0, bytes.bytes, start, valueBytes.length);
     return pointer;
   }
@@ -617,10 +639,10 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
 
   @SuppressWarnings("unchecked")
   private int writeEmbeddedMap(BytesContainer bytes, Map<Object, Object> map) {
-    int[] pos = new int[map.size()];
+    final int[] pos = new int[map.size()];
     int i = 0;
     Entry<Object, Object> values[] = new Entry[map.size()];
-    int fullPos = OVarIntSerializer.write(bytes, map.size());
+    final int fullPos = OVarIntSerializer.write(bytes, map.size());
     for (Entry<Object, Object> entry : map.entrySet()) {
       // TODO:check skip of complex types
       // FIXME: changed to support only string key on map
@@ -634,9 +656,9 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
 
     for (i = 0; i < values.length; i++) {
       int pointer = 0;
-      Object value = values[i].getValue();
+      final Object value = values[i].getValue();
       if (value != null) {
-        OType type = getTypeFromValueEmbedded(value);
+        final OType type = getTypeFromValueEmbedded(value);
         if (type == null) {
           throw new OSerializationException("Impossible serialize value of type " + value.getClass()
               + " with the ODocument binary serializer");
@@ -662,7 +684,8 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
           return record;
         }
       }
-    } else if (link instanceof ORecord) {
+    } else if (link instanceof OIdentifiable) {
+      link = link.getRecord();
       ORID rid = link.getIdentity();
       if (((ORecord) link).isDirty() || (rid.isTemporary())) {
         if (ONetworkThreadLocalSerializer.getNetworkSerializer() != null)
@@ -683,27 +706,43 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
 
   private int writeOptimizedLink(BytesContainer bytes, OIdentifiable link) {
     link = recursiveLinkSave(link);
-    assert link.getIdentity().isValid() || (ODatabaseRecordThreadLocal.INSTANCE.get().getStorage() instanceof OStorageProxy) : "Impossible to serialize invalid link";
+    assert link.getIdentity().getClusterId() >= 0
+        || ORecordSerializationContext.getContext() == null : "Impossible to serialize invalid link";
     int pos = OVarIntSerializer.write(bytes, link.getIdentity().getClusterId());
     OVarIntSerializer.write(bytes, link.getIdentity().getClusterPosition());
     return pos;
   }
 
-  private int writeLinkCollection(BytesContainer bytes, Collection<OIdentifiable> value) {
+  private int writeLinkCollection(final BytesContainer bytes, final Collection<OIdentifiable> value) {
     assert (!(value instanceof OMVRBTreeRIDSet));
-    int pos = OVarIntSerializer.write(bytes, value.size());
-    for (OIdentifiable itemValue : value) {
-      // TODO: handle the null links
-      if (itemValue == null)
-        writeNullLink(bytes);
-      else
-        writeOptimizedLink(bytes, itemValue);
+    final int pos = OVarIntSerializer.write(bytes, value.size());
+
+    final boolean disabledAutoConvertion = value instanceof ORecordLazyMultiValue
+        && ((ORecordLazyMultiValue) value).isAutoConvertToRecord();
+
+    if (disabledAutoConvertion)
+      // AVOID TO FETCH RECORD
+      ((ORecordLazyMultiValue) value).setAutoConvertToRecord(false);
+
+    try {
+      for (OIdentifiable itemValue : value) {
+        // TODO: handle the null links
+        if (itemValue == null)
+          writeNullLink(bytes);
+        else
+          writeOptimizedLink(bytes, itemValue);
+      }
+
+    } finally {
+      if (disabledAutoConvertion)
+        ((ORecordLazyMultiValue) value).setAutoConvertToRecord(true);
     }
+
     return pos;
   }
 
-  private int writeEmbeddedCollection(BytesContainer bytes, Collection<?> value, OType linkedType) {
-    int pos = OVarIntSerializer.write(bytes, value.size());
+  private int writeEmbeddedCollection(final BytesContainer bytes, final Collection<?> value, final OType linkedType) {
+    final int pos = OVarIntSerializer.write(bytes, value.size());
     // TODO manage embedded type from schema and auto-determined.
     writeOType(bytes, bytes.alloc(1), OType.ANY);
     for (Object itemValue : value) {
@@ -735,9 +774,9 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
       if (prop != null)
         type = prop.getType();
 
-      if (type == null || OType.ANY == type)
-        type = OType.getTypeByValue(entry.value);
     }
+    if (type == null || OType.ANY == type)
+      type = OType.getTypeByValue(entry.value);
     return type;
   }
 
@@ -748,14 +787,14 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
     return type;
   }
 
-  private String readString(final BytesContainer bytes) {
+  protected String readString(final BytesContainer bytes) {
     final int len = OVarIntSerializer.readAsInteger(bytes);
     final String res = stringFromBytes(bytes.bytes, bytes.offset, len);
     bytes.skip(len);
     return res;
   }
 
-  private int readInteger(final BytesContainer container) {
+  protected int readInteger(final BytesContainer container) {
     final int value = OIntegerSerializer.INSTANCE.deserializeLiteral(container.bytes, container.offset);
     container.offset += OIntegerSerializer.INT_SIZE;
     return value;
@@ -791,11 +830,28 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
     }
   }
 
-  private String stringFromBytes(final byte[] bytes, final int offset, final int len) {
+  protected String stringFromBytes(final byte[] bytes, final int offset, final int len) {
     try {
       return new String(bytes, offset, len, CHARSET_UTF_8);
     } catch (UnsupportedEncodingException e) {
       throw new OSerializationException("Error on string decoding", e);
     }
   }
+
+  public long convertDayToTimezone(TimeZone from, TimeZone to, long time) {
+    Calendar fromCalendar = Calendar.getInstance(from);
+    fromCalendar.setTimeInMillis(time);
+    Calendar toCalendar = Calendar.getInstance(to);
+    toCalendar.setTimeInMillis(0);
+    toCalendar.set(Calendar.ERA, fromCalendar.get(Calendar.ERA));
+    toCalendar.set(Calendar.YEAR, fromCalendar.get(Calendar.YEAR));
+    toCalendar.set(Calendar.MONTH, fromCalendar.get(Calendar.MONTH));
+    toCalendar.set(Calendar.DAY_OF_MONTH, fromCalendar.get(Calendar.DAY_OF_MONTH));
+    toCalendar.set(Calendar.HOUR, 0);
+    toCalendar.set(Calendar.MINUTE, 0);
+    toCalendar.set(Calendar.SECOND, 0);
+    toCalendar.set(Calendar.MILLISECOND, 0);
+    return toCalendar.getTimeInMillis();
+  }
+
 }

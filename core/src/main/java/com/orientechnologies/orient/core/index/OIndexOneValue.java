@@ -26,6 +26,8 @@ import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.serialization.serializer.stream.OStreamSerializer;
 import com.orientechnologies.orient.core.serialization.serializer.stream.OStreamSerializerRID;
+import com.orientechnologies.orient.core.storage.OStorage;
+import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -43,48 +45,62 @@ import java.util.Set;
  * 
  */
 public abstract class OIndexOneValue extends OIndexAbstract<OIdentifiable> {
-  public OIndexOneValue(final String type, String algorithm, OIndexEngine<OIdentifiable> engine, String valueContainerAlgorithm,
-      ODocument metadata) {
-    super(type, algorithm, engine, valueContainerAlgorithm, metadata);
+  public OIndexOneValue(String name, final String type, String algorithm, OIndexEngine<OIdentifiable> engine,
+      String valueContainerAlgorithm, ODocument metadata, OStorage storage) {
+    super(name, type, algorithm, engine, valueContainerAlgorithm, metadata, storage);
   }
 
   public OIdentifiable get(Object iKey) {
-    checkForRebuild();
-
     iKey = getCollatingValue(iKey);
 
-    acquireSharedLock();
+    final ODatabase database = getDatabase();
+    final boolean txIsActive = database.getTransaction().isActive();
+    if (!txIsActive)
+      keyLockManager.acquireSharedLock(iKey);
     try {
-      return indexEngine.get(iKey);
+      acquireSharedLock();
+      try {
+        return indexEngine.get(iKey);
+      } finally {
+        releaseSharedLock();
+      }
     } finally {
-      releaseSharedLock();
+      if (!txIsActive)
+        keyLockManager.releaseSharedLock(iKey);
     }
+
   }
 
   public long count(Object iKey) {
-    checkForRebuild();
-
     iKey = getCollatingValue(iKey);
 
-    acquireSharedLock();
+    final ODatabase database = getDatabase();
+    final boolean txIsActive = database.getTransaction().isActive();
+    if (!txIsActive)
+      keyLockManager.acquireSharedLock(iKey);
+
     try {
-      return indexEngine.contains(iKey) ? 1 : 0;
+      acquireSharedLock();
+      try {
+        return indexEngine.contains(iKey) ? 1 : 0;
+      } finally {
+        releaseSharedLock();
+      }
     } finally {
-      releaseSharedLock();
+      if (!txIsActive)
+        keyLockManager.releaseSharedLock(iKey);
     }
   }
 
   @Override
   public ODocument checkEntry(final OIdentifiable record, Object key) {
-    checkForRebuild();
-
     key = getCollatingValue(key);
 
-		final ODatabase database = getDatabase();
-		final boolean txIsActive = database.getTransaction().isActive();
+    final ODatabase database = getDatabase();
+    final boolean txIsActive = database.getTransaction().isActive();
 
-		if (txIsActive)
-			keyLockManager.acquireSharedLock(key);
+    if (!txIsActive)
+      keyLockManager.acquireSharedLock(key);
     try {
       // CHECK IF ALREADY EXIST
       final OIdentifiable indexedRID = get(key);
@@ -98,21 +114,19 @@ public abstract class OIndexOneValue extends OIndexAbstract<OIdentifiable> {
       }
       return null;
     } finally {
-			if (txIsActive)
-      	keyLockManager.releaseSharedLock(key);
+      if (!txIsActive)
+        keyLockManager.releaseSharedLock(key);
     }
   }
 
   public OIndexOneValue create(final String name, final OIndexDefinition indexDefinition, final String clusterIndexName,
       final Set<String> clustersToIndex, boolean rebuild, final OProgressListener progressListener) {
-    return (OIndexOneValue) super.create(name, indexDefinition, clusterIndexName, clustersToIndex, rebuild, progressListener,
+    return (OIndexOneValue) super.create(indexDefinition, clusterIndexName, clustersToIndex, rebuild, progressListener,
         determineValueSerializer());
   }
 
   @Override
   public OIndexCursor iterateEntries(Collection<?> keys, boolean ascSortOrder) {
-    checkForRebuild();
-
     final List<Object> sortedKeys = new ArrayList<Object>(keys);
     final Comparator<Object> comparator;
 
@@ -171,8 +185,6 @@ public abstract class OIndexOneValue extends OIndexAbstract<OIdentifiable> {
   @Override
   public OIndexCursor iterateEntriesBetween(Object fromKey, boolean fromInclusive, Object toKey, boolean toInclusive,
       boolean ascOrder) {
-    checkForRebuild();
-
     fromKey = getCollatingValue(fromKey);
     toKey = getCollatingValue(toKey);
 
@@ -186,8 +198,6 @@ public abstract class OIndexOneValue extends OIndexAbstract<OIdentifiable> {
 
   @Override
   public OIndexCursor iterateEntriesMajor(Object fromKey, boolean fromInclusive, boolean ascOrder) {
-    checkForRebuild();
-
     fromKey = getCollatingValue(fromKey);
     acquireSharedLock();
     try {
@@ -199,8 +209,6 @@ public abstract class OIndexOneValue extends OIndexAbstract<OIdentifiable> {
 
   @Override
   public OIndexCursor iterateEntriesMinor(Object toKey, boolean toInclusive, boolean ascOrder) {
-    checkForRebuild();
-
     toKey = getCollatingValue(toKey);
     acquireSharedLock();
     try {
@@ -211,31 +219,25 @@ public abstract class OIndexOneValue extends OIndexAbstract<OIdentifiable> {
   }
 
   public long getSize() {
-    checkForRebuild();
-
-    acquireExclusiveLock();
+    acquireSharedLock();
     try {
       return indexEngine.size(null);
     } finally {
-      releaseExclusiveLock();
+      releaseSharedLock();
     }
   }
 
   public long getKeySize() {
-    checkForRebuild();
-
-    acquireExclusiveLock();
+    acquireSharedLock();
     try {
       return indexEngine.size(null);
     } finally {
-      releaseExclusiveLock();
+      releaseSharedLock();
     }
   }
 
   @Override
   public OIndexCursor cursor() {
-    checkForRebuild();
-
     acquireSharedLock();
     try {
       return indexEngine.cursor(null);
@@ -246,8 +248,6 @@ public abstract class OIndexOneValue extends OIndexAbstract<OIdentifiable> {
 
   @Override
   public OIndexCursor descCursor() {
-    checkForRebuild();
-
     acquireSharedLock();
     try {
       return indexEngine.descCursor(null);

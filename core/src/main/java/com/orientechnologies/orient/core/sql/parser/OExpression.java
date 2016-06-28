@@ -6,7 +6,6 @@ import java.util.Map;
 
 public class OExpression extends SimpleNode {
 
-  protected Object  value;
   protected Boolean singleQuotes;
   protected Boolean doubleQuotes;
 
@@ -28,8 +27,6 @@ public class OExpression extends SimpleNode {
     // TODO create an interface for this;
 
     if (value instanceof ORid) {
-      return null;// TODO
-    } else if (value instanceof OInputParameter) {
       return null;// TODO
     } else if (value instanceof OMathExpression) {
       return ((OMathExpression) value).createExecutorFilter();
@@ -54,8 +51,6 @@ public class OExpression extends SimpleNode {
 
     // if (value instanceof ORid) {
     // return null;// TODO
-    // } else if (value instanceof OInputParameter) {
-    // return null;// TODO
     // } else if (value instanceof OMathExpression) {
     // return null;// TODO
     // } else if (value instanceof OJson) {
@@ -74,24 +69,68 @@ public class OExpression extends SimpleNode {
       return value.toString();
     } else if (value instanceof String) {
       if (Boolean.TRUE.equals(singleQuotes)) {
-        return "'" + value + "'";
+        return "'" + encodeSingle((String)value)+ "'";
       }
-      return "\"" + value + "\"";
+      return "\"" + encode((String)value) + "\"";
     } else {
       return "" + value;
     }
   }
 
   public static String encode(String s) {
-    return s.replaceAll("\"", "\\\\\"");
+    StringBuilder builder = new StringBuilder(s.length());
+    for(char c:s.toCharArray()){
+      if(c=='\n'){
+        builder.append("\\n");
+        continue;
+      }
+      if(c=='\t'){
+        builder.append("\\t");
+        continue;
+      }
+      if(c=='\\' || c == '"'){
+        builder.append("\\");
+      }
+      builder.append(c);
+    }
+    return builder.toString();
+  }
+
+  public static String encodeSingle(String s) {
+
+    StringBuilder builder = new StringBuilder(s.length());
+    for(char c:s.toCharArray()){
+      if(c=='\n'){
+        builder.append("\\n");
+        continue;
+      }
+      if(c=='\t'){
+        builder.append("\\t");
+        continue;
+      }
+      if(c=='\\' || c == '\''){
+        builder.append("\\");
+      }
+      builder.append(c);
+    }
+    return builder.toString();
   }
 
   public void replaceParameters(Map<Object, Object> params) {
-    if (value instanceof OInputParameter) {
-      value = ((OInputParameter) value).bindFromInputParams(params);
-    } else if (value instanceof OBaseExpression) {
+    if (value instanceof OBaseExpression) {
       ((OBaseExpression) value).replaceParameters(params);
+    } else if (value instanceof OParenthesisExpression) {
+      ((OParenthesisExpression) value).replaceParameters(params);
+    } else if (value instanceof OMathExpression) {
+      ((OMathExpression) value).replaceParameters(params);
     }
+  }
+
+  public boolean supportsBasicCalculation() {
+    if(value instanceof OMathExpression) {
+      return ((OMathExpression)value).supportsBasicCalculation();
+    }
+    return true;
   }
 }
 /* JavaCC - OriginalChecksum=9c860224b121acdc89522ae97010be01 (do not edit this line) */

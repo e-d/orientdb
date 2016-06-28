@@ -5,6 +5,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.UUID;
@@ -41,18 +42,7 @@ public class OrientTokenHandler extends OServerPluginAbstract implements OTokenH
   public static final String            ENCRYPTION_ALGORITHM_DEFAULT = "HmacSHA256";
 
   private static String                 algorithm                    = ENCRYPTION_ALGORITHM_DEFAULT;
-  private static final ThreadLocal<Mac> threadLocalMac               = new ThreadLocal<Mac>() {
-                                                                       @Override
-                                                                       protected Mac initialValue() {
-                                                                         try {
-                                                                           return Mac.getInstance(algorithm);
-                                                                         } catch (NoSuchAlgorithmException nsa) {
-                                                                           throw new IllegalArgumentException(
-                                                                               "Can't find encryption algorithm '" + algorithm
-                                                                                   + "'");
-                                                                         }
-                                                                       }
-                                                                     };
+  private static final ThreadLocal<Mac> threadLocalMac               = new MacThreadLocal();
 
   protected static final int            JWT_DELIMITER                = '.';
   private boolean                       enabled                      = false;
@@ -78,7 +68,7 @@ public class OrientTokenHandler extends OServerPluginAbstract implements OTokenH
         try {
           Mac.getInstance(algorithm);
         } catch (NoSuchAlgorithmException nsa) {
-          throw new IllegalArgumentException("Can't find encryption algorithm '" + algorithm + "'");
+          throw new IllegalArgumentException("Can't find encryption algorithm '" + algorithm + "'", nsa);
         }
       }
 
@@ -383,7 +373,7 @@ public class OrientTokenHandler extends OServerPluginAbstract implements OTokenH
       mac.update(base, baseOffset, baseLength);
       final byte[] calculatedSignature = mac.doFinal();
 
-      return Arrays.equals(calculatedSignature, signature);
+      return MessageDigest.isEqual(calculatedSignature, signature);
 
     } catch (RuntimeException e) {
       throw e;
@@ -414,4 +404,14 @@ public class OrientTokenHandler extends OServerPluginAbstract implements OTokenH
     }
   }
 
+  private static class MacThreadLocal extends ThreadLocal<Mac> {
+    @Override
+    protected Mac initialValue() {
+      try {
+        return Mac.getInstance(algorithm);
+      } catch (NoSuchAlgorithmException nsa) {
+        throw new IllegalArgumentException("Can't find encryption algorithm '" + algorithm + "'", nsa);
+      }
+    }
+  }
 }

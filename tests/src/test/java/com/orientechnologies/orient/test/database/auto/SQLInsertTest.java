@@ -32,11 +32,7 @@ import org.testng.annotations.Optional;
 import org.testng.annotations.Parameters;
 import org.testng.annotations.Test;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
  * If some of the tests start to fail then check cluster number in queries, e.g #7:1. It can be because the order of clusters could
@@ -407,8 +403,9 @@ public class SQLInsertTest extends DocumentDBBaseTest {
 
   public void testAutoConversionOfEmbeddededListWithLinkedClass() {
     OClass c = database.getMetadata().getSchema().getOrCreateClass("TestConvert");
-    c.createProperty("embeddedListWithLinkedClass", OType.EMBEDDEDLIST,
-        database.getMetadata().getSchema().getOrCreateClass("TestConvertLinkedClass"));
+    if (!c.existsProperty("embeddedListWithLinkedClass"))
+      c.createProperty("embeddedListWithLinkedClass", OType.EMBEDDEDLIST,
+          database.getMetadata().getSchema().getOrCreateClass("TestConvertLinkedClass"));
 
     ODocument doc = database
         .command(
@@ -475,6 +472,36 @@ public class SQLInsertTest extends DocumentDBBaseTest {
     Assert.assertTrue(doc.field("embeddedNoLinkedClass") instanceof ODocument);
   }
 
+  public void testEmbeddedDates() {
+    OClass c = database.getMetadata().getSchema().getOrCreateClass("TestEmbeddedDates");
+
+    database
+        .command(
+            new OCommandSQL(
+                "insert into TestEmbeddedDates set events = [{\"on\": date(\"2005-09-08 04:00:00\", \"yyyy-MM-dd HH:mm:ss\", \"UTC\")}]\n"))
+        .execute();
+
+    List<ODocument> result = database.query(new OSQLSynchQuery<ODocument>("select from TestEmbeddedDates"));
+
+    Assert.assertEquals(result.size(), 1);
+    boolean found = false;
+    ODocument doc = result.get(0);
+    Collection events = doc.field("events");
+    for (Object event : events) {
+      Assert.assertTrue(event instanceof Map);
+      Object dateObj = ((Map) event).get("on");
+      Assert.assertTrue(dateObj instanceof Date);
+      Calendar cal = new GregorianCalendar();
+      cal.setTime((Date) dateObj);
+      Assert.assertEquals(cal.get(Calendar.YEAR), 2005);
+      found = true;
+    }
+
+    doc.delete();
+    Assert.assertEquals(found, true);
+
+  }
+
   public void testAutoConversionOfEmbeddededWithLinkedClass() {
     OClass c = database.getMetadata().getSchema().getOrCreateClass("TestConvert");
     c.createProperty("embeddedWithLinkedClass", OType.EMBEDDED,
@@ -487,6 +514,36 @@ public class SQLInsertTest extends DocumentDBBaseTest {
 
     Assert.assertTrue(doc.field("embeddedWithLinkedClass") instanceof ODocument);
     Assert.assertEquals(((ODocument) doc.field("embeddedWithLinkedClass")).getClassName(), "TestConvertLinkedClass");
+  }
+
+  public void testInsertEmbeddedWithRecordAttributes() {
+    OClass c = database.getMetadata().getSchema().getOrCreateClass("EmbeddedWithRecordAttributes");
+    c.createProperty("like", OType.EMBEDDED,
+        database.getMetadata().getSchema().getOrCreateClass("EmbeddedWithRecordAttributes_Like"));
+
+    ODocument doc = database.command(
+        new OCommandSQL("INSERT INTO EmbeddedWithRecordAttributes SET `like` = { \n" + "      count: 0, \n"
+            + "      latest: [], \n" + "      '@type': 'document', \n" + "      '@class': 'EmbeddedWithRecordAttributes_Like'\n"
+            + "    } ")).execute();
+
+    Assert.assertTrue(doc.field("like") instanceof OIdentifiable);
+    Assert.assertEquals(((ODocument) doc.field("like")).getClassName(), "EmbeddedWithRecordAttributes_Like");
+    Assert.assertEquals(((ODocument) doc.field("like")).field("count"), 0);
+  }
+
+  public void testInsertEmbeddedWithRecordAttributes2() {
+    OClass c = database.getMetadata().getSchema().getOrCreateClass("EmbeddedWithRecordAttributes2");
+    c.createProperty("like", OType.EMBEDDED,
+        database.getMetadata().getSchema().getOrCreateClass("EmbeddedWithRecordAttributes2_Like"));
+
+    ODocument doc = database.command(
+        new OCommandSQL("INSERT INTO EmbeddedWithRecordAttributes2 SET `like` = { \n" + "      count: 0, \n"
+            + "      latest: [], \n" + "      @type: 'document', \n" + "      @class: 'EmbeddedWithRecordAttributes2_Like'\n"
+            + "    } ")).execute();
+
+    Assert.assertTrue(doc.field("like") instanceof OIdentifiable);
+    Assert.assertEquals(((ODocument) doc.field("like")).getClassName(), "EmbeddedWithRecordAttributes2_Like");
+    Assert.assertEquals(((ODocument) doc.field("like")).field("count"), 0);
   }
 
   private List<Long> getValidPositions(int clusterId) {

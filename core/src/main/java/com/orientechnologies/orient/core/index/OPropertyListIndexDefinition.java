@@ -19,14 +19,11 @@
  */
 package com.orientechnologies.orient.core.index;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-
 import com.orientechnologies.orient.core.db.record.OMultiValueChangeEvent;
 import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.record.impl.ODocument;
+
+import java.util.*;
 
 /**
  * Index implementation bound to one schema class property that presents
@@ -37,8 +34,8 @@ import com.orientechnologies.orient.core.record.impl.ODocument;
  */
 public class OPropertyListIndexDefinition extends OAbstractIndexDefinitionMultiValue implements OIndexDefinitionMultiValue {
 
-  public OPropertyListIndexDefinition(final String iClassName, final String iField, final OType iType, int version) {
-    super(iClassName, iField, iType, version);
+  public OPropertyListIndexDefinition(final String iClassName, final String iField, final OType iType) {
+    super(iClassName, iField, iType);
   }
 
   public OPropertyListIndexDefinition() {
@@ -50,9 +47,9 @@ public class OPropertyListIndexDefinition extends OAbstractIndexDefinitionMultiV
   }
 
   @Override
-  public Object createValue(final List<?> params) {
+  public Object createValue(List<?> params) {
     if (!(params.get(0) instanceof Collection))
-      return null;
+      params = (List) Collections.singletonList(params);
 
     final Collection<?> multiValueCollection = (Collection<?>) params.get(0);
     final List<Object> values = new ArrayList<Object>(multiValueCollection.size());
@@ -77,7 +74,11 @@ public class OPropertyListIndexDefinition extends OAbstractIndexDefinitionMultiV
   }
 
   public Object createSingleValue(final Object... param) {
-    return OType.convert(param[0], keyType.getDefaultJavaType());
+    try {
+      return OType.convert(param[0], keyType.getDefaultJavaType());
+    } catch (Exception e) {
+      throw new OIndexException("Invalid key for index: " + param[0] + " cannot be converted to " + keyType, e);
+    }
   }
 
   public void processChangeEvent(final OMultiValueChangeEvent<?, ?> changeEvent, final Map<Object, Integer> keysToAdd,
@@ -102,7 +103,7 @@ public class OPropertyListIndexDefinition extends OAbstractIndexDefinitionMultiV
   }
 
   @Override
-  public String toCreateIndexDDL(String indexName, String indexType) {
-    return createIndexDDLWithoutFieldType(indexName, indexType).toString();
+  public String toCreateIndexDDL(String indexName, String indexType, String engine) {
+    return createIndexDDLWithoutFieldType(indexName, indexType, engine).toString();
   }
 }

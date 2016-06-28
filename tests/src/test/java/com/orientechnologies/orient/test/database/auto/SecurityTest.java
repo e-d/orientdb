@@ -19,8 +19,7 @@ import java.io.IOException;
 import java.util.Date;
 import java.util.List;
 
-import com.orientechnologies.orient.core.metadata.security.*;
-import com.orientechnologies.orient.core.storage.OStorageProxy;
+import com.orientechnologies.orient.core.exception.OValidationException;
 import org.testng.Assert;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Optional;
@@ -28,12 +27,15 @@ import org.testng.annotations.Parameters;
 import org.testng.annotations.Test;
 
 import com.orientechnologies.common.exception.OException;
-import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.exception.OSecurityAccessException;
+import com.orientechnologies.orient.core.exception.OSecurityException;
+import com.orientechnologies.orient.core.metadata.security.*;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.sql.OCommandSQL;
 import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
+import com.orientechnologies.orient.core.storage.OStorageProxy;
 import com.orientechnologies.orient.enterprise.channel.binary.OResponseProcessingException;
+import com.orientechnologies.orient.graph.gremlin.OCommandGremlin;
 
 @Test(groups = "security")
 public class SecurityTest extends DocumentDBBaseTest {
@@ -80,8 +82,8 @@ public class SecurityTest extends DocumentDBBaseTest {
     database.open("reader", "reader");
 
     try {
-      new ODocument("Profile").fields("nick", "error", "password", "I don't know", "lastAccessOn", new Date(), "registeredOn",
-          new Date()).save();
+      new ODocument("Profile")
+          .fields("nick", "error", "password", "I don't know", "lastAccessOn", new Date(), "registeredOn", new Date()).save();
     } catch (OSecurityAccessException e) {
       Assert.assertTrue(true);
     } catch (OResponseProcessingException e) {
@@ -120,24 +122,305 @@ public class SecurityTest extends DocumentDBBaseTest {
     ORole writerChild = security.createRole("writerChild", writer, OSecurityRole.ALLOW_MODES.ALLOW_ALL_BUT);
     writerChild.save();
 
-    ORole writerGrandChild = security.createRole("writerGrandChild", writerChild, OSecurityRole.ALLOW_MODES.ALLOW_ALL_BUT);
-    writerGrandChild.save();
+    try {
+      ORole writerGrandChild = security.createRole("writerGrandChild", writerChild, OSecurityRole.ALLOW_MODES.ALLOW_ALL_BUT);
+      writerGrandChild.save();
 
-    OUser child = security.createUser("writerChild", "writerChild", writerGrandChild);
-    child.save();
+      try {
+        OUser child = security.createUser("writerChild", "writerChild", writerGrandChild);
+        child.save();
 
-    Assert.assertTrue(child.hasRole("writer", true));
-    Assert.assertFalse(child.hasRole("wrter", true));
+        try {
+          Assert.assertTrue(child.hasRole("writer", true));
+          Assert.assertFalse(child.hasRole("wrter", true));
+
+          database.close();
+          if (!(database.getStorage() instanceof OStorageProxy)) {
+            database.open("writerChild", "writerChild");
+
+            OSecurityUser user = database.getUser();
+            Assert.assertTrue(user.hasRole("writer", true));
+            Assert.assertFalse(user.hasRole("wrter", true));
+
+            database.close();
+          }
+          database.open("admin", "admin");
+        } finally {
+          security.dropUser("writerChild");
+        }
+      } finally {
+        security.dropRole("writerGrandChild");
+      }
+    } finally {
+      security.dropRole("writerChild");
+    }
+  }
+
+  @Test
+  public void testQuotedUserName() {
+    database.open("admin", "admin");
+
+    OSecurity security = database.getMetadata().getSecurity();
+
+    ORole adminRole = security.getRole("admin");
+    OUser newUser = security.createUser("user'quoted", "foobar", adminRole);
 
     database.close();
-    if (!(database.getStorage() instanceof OStorageProxy)) {
-			database.open("writerChild", "writerChild");
 
-			OSecurityUser user = database.getUser();
-			Assert.assertTrue(user.hasRole("writer", true));
-			Assert.assertFalse(user.hasRole("wrter", true));
+    database.open("user'quoted", "foobar");
+    database.close();
 
-			database.close();
-		}
+    database.open("admin", "admin");
+    security = database.getMetadata().getSecurity();
+    OUser user = security.getUser("user'quoted");
+    Assert.assertNotNull(user);
+    security.dropUser(user.getName());
+
+    database.close();
+
+    try {
+      database.open("user'quoted", "foobar");
+      Assert.fail();
+    } catch (Exception e) {
+
+    }
+  }
+
+  @Test
+  public void testUserNoRole() {
+    database.open("admin", "admin");
+
+    OSecurity security = database.getMetadata().getSecurity();
+
+    OUser newUser = security.createUser("noRole", "noRole", (String[]) null);
+
+    database.close();
+
+    try {
+      database.open("noRole", "noRole");
+      Assert.fail();
+    } catch (OSecurityAccessException e) {
+      database.open("admin", "admin");
+      security.dropUser("noRole");
+    }
+  }
+
+  @Test
+  public void testAdminCanSeeSystemClusters() {
+    database.open("admin", "admin");
+
+    List<ODocument> result = database.command(new OCommandSQL("select from ouser")).execute();
+    Assert.assertFalse(result.isEmpty());
+
+    Assert.assertTrue(database.browseClass("OUser").hasNext());
+
+    Assert.assertTrue(database.browseCluster("OUser").hasNext());
+  }
+
+  @Test
+  public void testOnlyAdminCanSeeSystemClusters() {
+    database.open("reader", "reader");
+
+    try {
+      database.command(new OCommandSQL("select from ouser")).execute();
+    } catch (OSecurityException e) {
+    }
+
+    try {
+      Assert.assertFalse(database.browseClass("OUser").hasNext());
+      Assert.fail();
+    } catch (OSecurityException e) {
+    }
+
+    try {
+      Assert.assertFalse(database.browseCluster("OUser").hasNext());
+      Assert.fail();
+    } catch (OSecurityException e) {
+    }
+  }
+
+  @Test
+  public void testCannotExtendClassWithNoUpdateProvileges() {
+    database.open("admin", "admin");
+    database.getMetadata().getSchema().createClass("Protected");
+    database.close();
+
+    database.open("writer", "writer");
+
+    try {
+      database.command(new OCommandSQL("alter class Protected superclass OUser")).execute();
+      Assert.fail();
+    } catch (OSecurityException e) {
+    } finally {
+      database.close();
+
+      database.open("admin", "admin");
+      database.getMetadata().getSchema().dropClass("Protected");
+    }
+  }
+
+  @Test
+  public void testSuperUserCanExtendClassWithNoUpdateProvileges() {
+    database.open("admin", "admin");
+    database.getMetadata().getSchema().createClass("Protected");
+
+    try {
+      database.command(new OCommandSQL("alter class Protected superclass OUser")).execute();
+    } finally {
+      database.getMetadata().getSchema().dropClass("Protected");
+    }
+  }
+
+  @Test
+  public void testGremlinExecution() throws IOException {
+    if (!database.getURL().startsWith("remote:"))
+      return;
+
+    database.open("admin", "admin");
+    try {
+      database.command(new OCommandGremlin("g.V")).execute();
+    } finally {
+      database.close();
+    }
+
+    database.open("reader", "reader");
+    try {
+      database.command(new OCommandGremlin("g.V")).execute();
+      Assert.fail("Security breach: Gremlin can be executed by reader user!");
+    } catch (OSecurityException e) {
+    } finally {
+      database.close();
+    }
+
+    database.open("writer", "writer");
+    try {
+      database.command(new OCommandGremlin("g.V")).execute();
+      Assert.fail("Security breach: Gremlin can be executed by writer user!");
+    } catch (OSecurityException e) {
+    } finally {
+      database.close();
+    }
+  }
+
+  @Test
+  public void testEmptyUserName() {
+    database.open("admin", "admin");
+    try {
+      OSecurity security = database.getMetadata().getSecurity();
+
+      ORole reader = security.getRole("reader");
+      String userName = "";
+      try {
+        security.createUser(userName, "foobar", reader);
+        Assert.assertTrue(false);
+      } catch (OValidationException ve) {
+        Assert.assertTrue(true);
+
+      }
+      Assert.assertNull(security.getUser(userName));
+    } finally {
+      database.close();
+    }
+  }
+
+  @Test
+  public void testUserNameWithAllSpaces() {
+    database.open("admin", "admin");
+    try {
+      OSecurity security = database.getMetadata().getSecurity();
+
+      ORole reader = security.getRole("reader");
+      final String userName = "  ";
+      try {
+        security.createUser(userName, "foobar", reader);
+        Assert.assertTrue(false);
+      } catch (OValidationException ve) {
+        Assert.assertTrue(true);
+
+      }
+      Assert.assertNull(security.getUser(userName));
+    } finally {
+      database.close();
+    }
+  }
+
+  @Test
+  public void testUserNameWithSurroundingSpacesOne() {
+    database.open("admin", "admin");
+    try {
+      OSecurity security = database.getMetadata().getSecurity();
+
+      ORole reader = security.getRole("reader");
+      final String userName = " sas";
+      try {
+        security.createUser(userName, "foobar", reader);
+        Assert.assertTrue(false);
+      } catch (OValidationException ve) {
+        Assert.assertTrue(true);
+
+      }
+      Assert.assertNull(security.getUser(userName));
+    } finally {
+      database.close();
+    }
+  }
+
+  @Test
+  public void testUserNameWithSurroundingSpacesTwo() {
+    database.open("admin", "admin");
+    try {
+      OSecurity security = database.getMetadata().getSecurity();
+
+      ORole reader = security.getRole("reader");
+      final String userName = "sas ";
+      try {
+        security.createUser(userName, "foobar", reader);
+        Assert.assertTrue(false);
+      } catch (OValidationException ve) {
+        Assert.assertTrue(true);
+
+      }
+      Assert.assertNull(security.getUser(userName));
+    } finally {
+      database.close();
+    }
+  }
+
+  @Test
+  public void testUserNameWithSurroundingSpacesThree() {
+    database.open("admin", "admin");
+    try {
+      OSecurity security = database.getMetadata().getSecurity();
+
+      ORole reader = security.getRole("reader");
+      final String userName = " sas ";
+      try {
+        security.createUser(userName, "foobar", reader);
+        Assert.assertTrue(false);
+      } catch (OValidationException ve) {
+        Assert.assertTrue(true);
+
+      }
+      Assert.assertNull(security.getUser(userName));
+    } finally {
+      database.close();
+    }
+  }
+
+  @Test
+  public void testUserNameWithSpacesInTheMiddle() {
+    database.open("admin", "admin");
+    try {
+      OSecurity security = database.getMetadata().getSecurity();
+
+      ORole reader = security.getRole("reader");
+      final String userName = "s a s";
+      security.createUser(userName, "foobar", reader);
+      Assert.assertNotNull(security.getUser(userName));
+      security.dropUser(userName);
+      Assert.assertNull(security.getUser(userName));
+    } finally {
+      database.close();
+    }
   }
 }

@@ -19,28 +19,29 @@
   */
 package com.orientechnologies.orient.core.security;
 
-import com.orientechnologies.common.log.OLogManager;
-import com.orientechnologies.orient.core.exception.OConfigurationException;
-import com.orientechnologies.orient.core.exception.OSecurityAccessException;
-import com.orientechnologies.orient.core.exception.OSecurityException;
-
-import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
 import java.io.UnsupportedEncodingException;
 import java.security.Key;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+
+import com.orientechnologies.common.log.OLogManager;
+import com.orientechnologies.orient.core.exception.OConfigurationException;
+import com.orientechnologies.orient.core.exception.OSecurityAccessException;
+import com.orientechnologies.orient.core.exception.OSecurityException;
+
 public class OSecurityManager {
 
-  public static final String            ALGORITHM        = "SHA-256";
-  public static final String            ALGORITHM_PREFIX = "{" + ALGORITHM + "}";
+  public static final String ALGORITHM        = "SHA-256";
+  public static final String ALGORITHM_PREFIX = "{" + ALGORITHM + "}";
 
-  private static final OSecurityManager instance         = new OSecurityManager();
+  private static final OSecurityManager instance = new OSecurityManager();
 
-  private MessageDigest                 md;
+  private MessageDigest md;
 
   public OSecurityManager() {
     try {
@@ -50,8 +51,8 @@ public class OSecurityManager {
     }
   }
 
-  public static String digest2String(final String iInput, String iAlgorithm) throws NoSuchAlgorithmException,
-      UnsupportedEncodingException {
+  public static String digest2String(final String iInput, String iAlgorithm)
+      throws NoSuchAlgorithmException, UnsupportedEncodingException {
     if (iAlgorithm == null)
       iAlgorithm = ALGORITHM;
 
@@ -64,7 +65,7 @@ public class OSecurityManager {
     return instance;
   }
 
-  private static String byteArrayToHexStr(final byte[] data) {
+  public static String byteArrayToHexStr(final byte[] data) {
     if (data == null)
       return null;
 
@@ -87,10 +88,20 @@ public class OSecurityManager {
     return MessageDigest.isEqual(digest(iInput1), iInput2);
   }
 
-  public boolean check(final String iInput1, final String iInput2) {
-    final String s = iInput2.startsWith(ALGORITHM_PREFIX) ? iInput2.substring(ALGORITHM_PREFIX.length()) : iInput2;
+  public boolean check(String iInput1, String iInput2) {
+    if (iInput2.startsWith(ALGORITHM_PREFIX)) {
+      // iInput2 is a representation of the expected hash of iInput1
 
-    return digest2String(iInput1, false).equals(s);
+      // create the equivalent string representation of the hashed input 1
+      iInput1 = digest2String(iInput1);
+
+      // strip the algorithm prefix, getting the expected hash
+      iInput2 = iInput2.substring(ALGORITHM_PREFIX.length());
+
+      // fall through to the code that just checks two strings against each other
+    }
+
+    return MessageDigest.isEqual(digest(iInput1), digest(iInput2));
   }
 
   public String digest2String(final String iInput) {
@@ -99,7 +110,7 @@ public class OSecurityManager {
 
   /**
    * Hashes the input string.
-   * 
+   *
    * @param iInput
    *          String to hash
    * @param iIncludeAlgorithm
@@ -172,4 +183,23 @@ public class OSecurityManager {
       throw new OSecurityException("Error on decrypting data", e);
     }
   }
+
+  public String createSHA256(final String iInput) {
+    return byteArrayToHexStr(digestSHA256(iInput));
+  }
+
+  public synchronized byte[] digestSHA256(final String iInput) {
+    if (iInput == null)
+      return null;
+
+    try {
+      return md.digest(iInput.getBytes("UTF-8"));
+    } catch (UnsupportedEncodingException e) {
+      final String message = "The requested encoding is not supported: cannot execute security checks";
+      OLogManager.instance().error(this, message, e);
+
+      throw new OConfigurationException(message, e);
+    }
+  }
+
 }

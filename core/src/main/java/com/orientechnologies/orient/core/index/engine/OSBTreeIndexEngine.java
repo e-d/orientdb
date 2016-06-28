@@ -50,11 +50,10 @@ public class OSBTreeIndexEngine<V> extends OSharedResourceAdaptiveExternal imple
   public static final String       DATA_FILE_EXTENSION        = ".sbt";
   public static final String       NULL_BUCKET_FILE_EXTENSION = ".nbt";
 
-  private ORID                     identity;
   private final OSBTree<Object, V> sbTree;
   private int                      version;
 
-  public OSBTreeIndexEngine(Boolean durableInNonTxMode, OAbstractPaginatedStorage storage, int version) {
+  public OSBTreeIndexEngine(String name, Boolean durableInNonTxMode, OAbstractPaginatedStorage storage, int version) {
     super(OGlobalConfiguration.ENVIRONMENT_CONCURRENT.getValueAsBoolean(), OGlobalConfiguration.MVRBTREE_TIMEOUT
         .getValueAsInteger(), true);
 
@@ -67,7 +66,7 @@ public class OSBTreeIndexEngine<V> extends OSharedResourceAdaptiveExternal imple
 
     this.version = version;
 
-    sbTree = new OSBTree<Object, V>(DATA_FILE_EXTENSION, durableInNonTx, NULL_BUCKET_FILE_EXTENSION, storage);
+    sbTree = new OSBTree<Object, V>(name, DATA_FILE_EXTENSION, durableInNonTx, NULL_BUCKET_FILE_EXTENSION, storage);
   }
 
   @Override
@@ -85,25 +84,16 @@ public class OSBTreeIndexEngine<V> extends OSharedResourceAdaptiveExternal imple
   }
 
   @Override
-  public void create(String indexName, OIndexDefinition indexDefinition, String clusterIndexName,
-      OStreamSerializer valueSerializer, boolean isAutomatic) {
+  public void create(OIndexDefinition indexDefinition, String clusterIndexName, OStreamSerializer valueSerializer,
+      boolean isAutomatic) {
     acquireExclusiveLock();
     try {
 
       final OBinarySerializer keySerializer = determineKeySerializer(indexDefinition);
       final int keySize = determineKeySize(indexDefinition);
 
-      final ORecordBytes identityRecord = new ORecordBytes();
-      ODatabaseDocumentInternal database = getDatabase();
-
-      final OAbstractPaginatedStorage storageLocalAbstract = (OAbstractPaginatedStorage) database.getStorage().getUnderlying();
-
-      database.save(identityRecord, clusterIndexName);
-      identity = identityRecord.getIdentity();
-
-      sbTree.create(indexName, keySerializer, (OBinarySerializer<V>) valueSerializer,
-          indexDefinition != null ? indexDefinition.getTypes() : null, keySize,
-          indexDefinition != null && !indexDefinition.isNullValuesIgnored());
+      sbTree.create(keySerializer, (OBinarySerializer<V>) valueSerializer, indexDefinition != null ? indexDefinition.getTypes()
+          : null, keySize, indexDefinition != null && !indexDefinition.isNullValuesIgnored());
     } finally {
       releaseExclusiveLock();
     }
@@ -155,8 +145,7 @@ public class OSBTreeIndexEngine<V> extends OSharedResourceAdaptiveExternal imple
   }
 
   @Override
-  public void load(ORID indexRid, String indexName, OIndexDefinition indexDefinition, OStreamSerializer valueSerializer,
-      boolean isAutomatic) {
+  public void load(String indexName, OIndexDefinition indexDefinition, OStreamSerializer valueSerializer, boolean isAutomatic) {
     acquireExclusiveLock();
     try {
       ODatabaseDocumentInternal database = getDatabase();
@@ -190,15 +179,6 @@ public class OSBTreeIndexEngine<V> extends OSharedResourceAdaptiveExternal imple
     }
   }
 
-  @Override
-  public ORID getIdentity() {
-    acquireSharedLock();
-    try {
-      return identity;
-    } finally {
-      releaseSharedLock();
-    }
-  }
 
   @Override
   public int getVersion() {

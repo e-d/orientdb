@@ -19,12 +19,7 @@
  */
 package com.orientechnologies.orient.core.sql;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-
+import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.common.util.OPatternConst;
 import com.orientechnologies.orient.core.collate.OCollate;
 import com.orientechnologies.orient.core.command.OCommandDistributedReplicateRequest;
@@ -37,6 +32,12 @@ import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.metadata.schema.OClassImpl;
 import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.record.impl.ODocument;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 /**
  * SQL CREATE INDEX command: Create a new index against a property.
@@ -251,15 +252,26 @@ public class OCommandExecutorSQLCreateIndex extends OCommandExecutorSQLAbstract 
             .getIndexManager()
             .createIndex(indexName, indexType.toString(),
                 new ORuntimeKeyIndexDefinition(serializerKeyId, factory.getLastVersion()), null, null, metadataDoc, engine);
-      } else
+      } else {
+        OLogManager.instance().warn(this,
+            "Key type is not provided for '%s' index. Untyped indexes are deprecated and considered unstable." +
+                " Please specify a key type.", indexName);
         idx = database.getMetadata().getIndexManager()
             .createIndex(indexName, indexType.toString(), null, null, null, metadataDoc, engine);
+      }
     } else {
       if ((keyTypes == null || keyTypes.length == 0) && collates == null) {
         idx = oClass.createIndex(indexName, indexType.toString(), null, metadataDoc, engine, fields);
       } else {
-        final List<OType> fieldTypeList = keyTypes != null ? Arrays.asList(keyTypes) : ((OClassImpl) oClass)
-            .extractFieldTypes(fields);
+        final List<OType> fieldTypeList;
+        if (keyTypes == null) {
+          for (final String fieldName : fields) {
+            if (!fieldName.equals("@rid") && !oClass.existsProperty(fieldName))
+              throw new OIndexException("Index with name : '" + indexName + "' cannot be created on class : '" + oClass.getName() + "' because field: '" + fieldName + "' is absent in class definition.");
+          }
+          fieldTypeList = ((OClassImpl) oClass).extractFieldTypes(fields);
+        } else
+          fieldTypeList = Arrays.asList(keyTypes);
 
         final OIndexDefinition idxDef = OIndexDefinitionFactory.createIndexDefinition(oClass, Arrays.asList(fields), fieldTypeList,
             collatesList, indexType.toString(), null);
@@ -273,6 +285,11 @@ public class OCommandExecutorSQLCreateIndex extends OCommandExecutorSQLAbstract 
       return idx.getSize();
 
     return null;
+  }
+
+  @Override
+  public QUORUM_TYPE getQuorumType() {
+    return QUORUM_TYPE.ALL;
   }
 
   @Override
@@ -295,7 +312,7 @@ public class OCommandExecutorSQLCreateIndex extends OCommandExecutorSQLAbstract 
           OPropertyMapIndexDefinition.INDEX_BY.valueOf(fieldNameParts[2].toUpperCase());
         } catch (IllegalArgumentException iae) {
           throw new OCommandSQLParsingException("Illegal field name format, should be '<property> [by key|value]' but was '"
-              + fieldName + "'", text, pos);
+              + fieldName + "'", text, pos, iae);
         }
         return;
       }

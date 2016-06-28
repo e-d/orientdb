@@ -19,9 +19,6 @@
  */
 package com.orientechnologies.orient.server.network.protocol.http.command.post;
 
-import java.util.Collection;
-import java.util.Map;
-
 import com.orientechnologies.common.collection.OMultiValue;
 import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.orient.core.command.OCommandManager;
@@ -33,6 +30,9 @@ import com.orientechnologies.orient.server.network.protocol.http.OHttpRequest;
 import com.orientechnologies.orient.server.network.protocol.http.OHttpResponse;
 import com.orientechnologies.orient.server.network.protocol.http.OHttpUtils;
 import com.orientechnologies.orient.server.network.protocol.http.command.OServerCommandDocumentAbstract;
+
+import java.util.Collection;
+import java.util.Map;
 
 /**
  * Executes a batch of operations in a single call. This is useful to reduce network latency issuing multiple commands as multiple
@@ -95,6 +95,13 @@ public class OServerCommandPostBatch extends OServerCommandDocumentAbstract {
     try {
       db = getProfiledDatabaseInstance(iRequest);
 
+      if (db.getTransaction().isActive()) {
+        // TEMPORARY PATCH TO UNDERSTAND WHY UNDER HIGH LOAD TX IS NOT COMMITTED AFTER BATCH. MAYBE A PENDING TRANSACTION?
+        OLogManager.instance().warn(this,
+            "Found database instance from the pool with a pending transaction. Forcing rollback before using it");
+        db.rollback(true);
+      }
+
       batch = new ODocument().fromJSON(iRequest.content);
 
       Boolean tx = batch.field("transaction");
@@ -105,7 +112,7 @@ public class OServerCommandPostBatch extends OServerCommandDocumentAbstract {
       try {
         operations = batch.field("operations");
       } catch (Exception e) {
-        throw new IllegalArgumentException("Expected 'operations' field as a collection of objects");
+        throw new IllegalArgumentException("Expected 'operations' field as a collection of objects", e);
       }
 
       if (operations == null || operations.isEmpty())

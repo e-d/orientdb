@@ -19,18 +19,20 @@
  */
 package com.orientechnologies.orient.core.sql;
 
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-
 import com.orientechnologies.orient.core.command.OCommandDistributedReplicateRequest;
 import com.orientechnologies.orient.core.command.OCommandRequest;
 import com.orientechnologies.orient.core.command.OCommandRequestText;
+import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.serialization.serializer.OStringSerializerHelper;
+import com.orientechnologies.orient.core.storage.OStorageOperationResult;
 import com.orientechnologies.orient.core.version.OVersionFactory;
+
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * SQL TRUNCATE RECORD command: Truncates a record without loading it. Useful when the record is dirty in any way and cannot be
@@ -84,22 +86,39 @@ public class OCommandExecutorSQLTruncateRecord extends OCommandExecutorSQLAbstra
     if (records.isEmpty())
       throw new OCommandExecutionException("Cannot execute the command because it has not been parsed yet");
 
+    int deleted = 0;
+
     final ODatabaseDocumentInternal database = getDatabase();
     for (String rec : records) {
       try {
         final ORecordId rid = new ORecordId(rec);
-        database.getStorage().deleteRecord(rid, OVersionFactory.instance().createUntrackedVersion(), 0, null);
+        final OStorageOperationResult<Boolean> result = database.getStorage().deleteRecord(rid,
+            OVersionFactory.instance().createUntrackedVersion(), 0, null);
         database.getLocalCache().deleteRecord(rid);
+
+        if (result.getResult())
+          deleted++;
+
       } catch (Throwable e) {
         throw new OCommandExecutionException("Error on executing command", e);
       }
     }
 
-    return records.size();
+    return deleted;
+  }
+
+  @Override
+  public long getDistributedTimeout() {
+    return OGlobalConfiguration.DISTRIBUTED_COMMAND_TASK_SYNCH_TIMEOUT.getValueAsLong();
   }
 
   @Override
   public String getSyntax() {
     return "TRUNCATE RECORD <rid>*";
+  }
+
+  @Override
+  public QUORUM_TYPE getQuorumType() {
+    return QUORUM_TYPE.WRITE;
   }
 }

@@ -22,6 +22,7 @@ package com.orientechnologies.common.log;
 
 import com.orientechnologies.common.exception.OException;
 import com.orientechnologies.common.parser.OSystemVariableResolver;
+import com.orientechnologies.orient.core.command.OCommandOutputListener;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
@@ -29,6 +30,8 @@ import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedSt
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.FileHandler;
 import java.util.logging.Handler;
@@ -45,6 +48,8 @@ public class OLogManager {
   private boolean                  error                        = true;
   private Level                    minimumLevel                 = Level.SEVERE;
 
+  private final ConcurrentMap<String, Logger> loggersCache = new ConcurrentHashMap<String, Logger>();
+
   protected OLogManager() {
   }
 
@@ -53,8 +58,8 @@ public class OLogManager {
   }
 
   public static void installCustomFormatter() {
-    final boolean installCustomFormatter = Boolean.parseBoolean(OSystemVariableResolver.resolveSystemVariables("${"
-        + ENV_INSTALL_CUSTOM_FORMATTER + "}", "true"));
+    final boolean installCustomFormatter = Boolean
+        .parseBoolean(OSystemVariableResolver.resolveSystemVariables("${" + ENV_INSTALL_CUSTOM_FORMATTER + "}", "true"));
 
     if (!installCustomFormatter)
       return;
@@ -90,8 +95,8 @@ public class OLogManager {
       final Object... iAdditionalArgs) {
     if (iMessage != null) {
       try {
-        final ODatabaseDocumentInternal db = ODatabaseRecordThreadLocal.INSTANCE != null ? ODatabaseRecordThreadLocal.INSTANCE
-            .getIfDefined() : null;
+        final ODatabaseDocumentInternal db = ODatabaseRecordThreadLocal.INSTANCE != null
+            ? ODatabaseRecordThreadLocal.INSTANCE.getIfDefined() : null;
         if (db != null && db.getStorage() != null && db.getStorage() instanceof OAbstractPaginatedStorage) {
           final String dbName = db.getStorage().getName();
           if (dbName != null)
@@ -100,7 +105,25 @@ public class OLogManager {
       } catch (Throwable e) {
       }
 
-      final Logger log = iRequester != null ? Logger.getLogger(iRequester.getClass().getName()) : Logger.getLogger(DEFAULT_LOG);
+      final String requesterName;
+      if (iRequester != null) {
+        requesterName = iRequester.getClass().getName();
+      } else {
+        requesterName = DEFAULT_LOG;
+      }
+
+      Logger log = loggersCache.get(requesterName);
+      if (log == null) {
+        log = Logger.getLogger(requesterName);
+
+        if (log != null) {
+          Logger oldLogger = loggersCache.putIfAbsent(requesterName, log);
+
+          if (oldLogger != null)
+            log = oldLogger;
+        }
+      }
+
       if (log == null) {
         // USE SYSERR
         try {
@@ -321,11 +344,16 @@ public class OLogManager {
     }
 
     Logger log = Logger.getLogger(DEFAULT_LOG);
-    for (Handler h : log.getHandlers()) {
-      if (h.getClass().isAssignableFrom(iHandler)) {
-        h.setLevel(level);
-        break;
+    while (log != null) {
+
+      for (Handler h : log.getHandlers()) {
+        if (h.getClass().isAssignableFrom(iHandler)) {
+          h.setLevel(level);
+          break;
+        }
       }
+
+      log = log.getParent();
     }
 
     return level;
@@ -334,5 +362,14 @@ public class OLogManager {
   public void flush() {
     for (Handler h : Logger.getLogger(Logger.GLOBAL_LOGGER_NAME).getHandlers())
       h.flush();
+  }
+
+  public OCommandOutputListener getCommandOutputListener(final Object iThis, final Level iLevel) {
+    return new OCommandOutputListener() {
+      @Override
+      public void onMessage(String iText) {
+        log(iThis, iLevel, iText, null);
+      }
+    };
   }
 }

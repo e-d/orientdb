@@ -33,7 +33,6 @@ import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.index.*;
 import com.orientechnologies.orient.core.index.hashindex.local.*;
 import com.orientechnologies.orient.core.iterator.OEmptyIterator;
-import com.orientechnologies.orient.core.record.impl.ORecordBytes;
 import com.orientechnologies.orient.core.serialization.serializer.binary.OBinarySerializerFactory;
 import com.orientechnologies.orient.core.serialization.serializer.binary.impl.index.OCompositeKeySerializer;
 import com.orientechnologies.orient.core.serialization.serializer.binary.impl.index.OSimpleKeySerializer;
@@ -55,10 +54,9 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
   private final OHashTable<Object, V>            hashTable;
   private final OMurmurHash3HashFunction<Object> hashFunction;
 
-  private volatile ORID                          identity;
   private int                                    version;
 
-  public OHashTableIndexEngine(Boolean durableInNonTxMode, OAbstractPaginatedStorage storage, int version) {
+  public OHashTableIndexEngine(String name, Boolean durableInNonTxMode, OAbstractPaginatedStorage storage, int version) {
     hashFunction = new OMurmurHash3HashFunction<Object>();
 
     boolean durableInNonTx;
@@ -69,10 +67,10 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
 
     this.version = version;
     if (version < 2)
-      hashTable = new OLocalHashTable20<Object, V>(METADATA_FILE_EXTENSION, TREE_FILE_EXTENSION, BUCKET_FILE_EXTENSION,
+      hashTable = new OLocalHashTable20<Object, V>(name, METADATA_FILE_EXTENSION, TREE_FILE_EXTENSION, BUCKET_FILE_EXTENSION,
           NULL_BUCKET_FILE_EXTENSION, hashFunction, durableInNonTx, storage);
     else
-      hashTable = new OLocalHashTable<Object, V>(METADATA_FILE_EXTENSION, TREE_FILE_EXTENSION, BUCKET_FILE_EXTENSION,
+      hashTable = new OLocalHashTable<Object, V>(name, METADATA_FILE_EXTENSION, TREE_FILE_EXTENSION, BUCKET_FILE_EXTENSION,
           NULL_BUCKET_FILE_EXTENSION, hashFunction, durableInNonTx, storage);
   }
 
@@ -81,8 +79,8 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
   }
 
   @Override
-  public void create(String indexName, OIndexDefinition indexDefinition, String clusterIndexName,
-      OStreamSerializer valueSerializer, boolean isAutomatic) {
+  public void create(OIndexDefinition indexDefinition, String clusterIndexName, OStreamSerializer valueSerializer,
+      boolean isAutomatic) {
     OBinarySerializer keySerializer;
 
     if (indexDefinition != null) {
@@ -98,16 +96,9 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
     } else
       keySerializer = new OSimpleKeySerializer();
 
-    final ODatabaseDocumentInternal database = getDatabase();
-    final ORecordBytes identityRecord = new ORecordBytes();
-
-    database.save(identityRecord, clusterIndexName);
-    identity = identityRecord.getIdentity();
-
     hashFunction.setValueSerializer(keySerializer);
-    hashTable.create(indexName, keySerializer, (OBinarySerializer<V>) valueSerializer,
-        indexDefinition != null ? indexDefinition.getTypes() : null,
-        indexDefinition != null && !indexDefinition.isNullValuesIgnored());
+    hashTable.create(keySerializer, (OBinarySerializer<V>) valueSerializer, indexDefinition != null ? indexDefinition.getTypes()
+        : null, indexDefinition != null && !indexDefinition.isNullValuesIgnored());
   }
 
   @Override
@@ -126,9 +117,7 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
   }
 
   @Override
-  public void load(ORID indexRid, String indexName, OIndexDefinition indexDefinition, OStreamSerializer valueSerializer,
-      boolean isAutomatic) {
-    identity = indexRid;
+  public void load(String indexName, OIndexDefinition indexDefinition, OStreamSerializer valueSerializer, boolean isAutomatic) {
     hashTable.load(indexName, indexDefinition != null ? indexDefinition.getTypes() : null, indexDefinition != null
         && !indexDefinition.isNullValuesIgnored());
     hashFunction.setValueSerializer(hashTable.getKeySerializer());
@@ -185,11 +174,6 @@ public final class OHashTableIndexEngine<V> implements OIndexEngine<V> {
 
       return counter;
     }
-  }
-
-  @Override
-  public ORID getIdentity() {
-    return identity;
   }
 
   @Override

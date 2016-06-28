@@ -15,12 +15,6 @@
  */
 package com.orientechnologies.orient.server.distributed;
 
-import java.util.List;
-import java.util.Random;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicLong;
-
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.db.OPartitionedDatabasePoolFactory;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
@@ -29,6 +23,12 @@ import com.orientechnologies.orient.core.exception.OConcurrentModificationExcept
 import com.orientechnologies.orient.core.exception.ORecordNotFoundException;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
+
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Executes random operations against multiple servers
@@ -39,8 +39,8 @@ public class SimulateOperationsAgainstServer {
   protected final AtomicLong                    totalOperations = new AtomicLong();
   protected int                                 count           = 1000;
   protected int                                 threads         = 20;
-  protected String[]                            urls            = new String[] { "remote:localhost:2424/test",
-      "remote:localhost:2425/test"                             };
+  protected String[]                            urls            = new String[] { "remote:localhost:2424/SimulateOperationsAgainstServer",
+      "remote:localhost:2425/SimulateOperationsAgainstServer"                             };
   protected String                              className       = "Customer";
   protected String                              userName        = "admin";
   protected String                              userPassword    = "admin";
@@ -90,10 +90,11 @@ public class SimulateOperationsAgainstServer {
 
               totalOperations.addAndGet(1);
 
-              try {
-                Thread.sleep(delay);
-              } catch (InterruptedException e) {
-              }
+              if (delay > 0)
+                try {
+                  Thread.sleep(delay);
+                } catch (InterruptedException e) {
+                }
 
             } catch (Exception e) {
               e.printStackTrace();

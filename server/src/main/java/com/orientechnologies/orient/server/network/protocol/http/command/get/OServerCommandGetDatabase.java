@@ -53,6 +53,15 @@ public class OServerCommandGetDatabase extends OServerCommandGetConnect {
     json.beginObject();
     json.writeAttribute("name", cls.getName());
     json.writeAttribute("superClass", cls.getSuperClass() != null ? cls.getSuperClass().getName() : "");
+
+    json.beginCollection("superClasses");
+    int i = 0;
+    for (OClass oClass : cls.getSuperClasses()) {
+      json.write((i > 0 ? "," : "") + "\"" + oClass.getName() + "\"");
+      i++;
+    }
+    json.endCollection();
+
     json.writeAttribute("alias", cls.getShortName());
     json.writeAttribute("abstract", cls.isAbstract());
     json.writeAttribute("strictmode", cls.isStrictMode());
@@ -166,7 +175,7 @@ public class OServerCommandGetDatabase extends OServerCommandGetConnect {
       json.writeAttribute("javaVersion", System.getProperty("java.vm.version"));
       json.endObject();
 
-      if (((OMetadataInternal)db.getMetadata()).getImmutableSchemaSnapshot().getClasses() != null) {
+      if (((OMetadataInternal) db.getMetadata()).getImmutableSchemaSnapshot().getClasses() != null) {
         json.beginCollection("classes");
         List<String> classNames = new ArrayList<String>();
 
@@ -221,41 +230,7 @@ public class OServerCommandGetDatabase extends OServerCommandGetConnect {
       if (db.getUser() != null) {
         json.writeAttribute("currentUser", db.getUser().getName());
 
-        json.beginCollection("users");
-        for (ODocument doc : db.getMetadata().getSecurity().getAllUsers()) {
-          OUser user = new OUser(doc);
-          json.beginObject();
-          json.writeAttribute("name", user.getName());
-          json.writeAttribute("roles", user.getRoles() != null ? Arrays.toString(user.getRoles().toArray()) : "null");
-          json.endObject();
-        }
-        json.endCollection();
-
-        json.beginCollection("roles");
-        ORole role;
-        for (ODocument doc : db.getMetadata().getSecurity().getAllRoles()) {
-          role = new ORole(doc);
-          json.beginObject();
-          json.writeAttribute("name", role.getName());
-          json.writeAttribute("mode", role.getMode().toString());
-
-          json.beginCollection("rules");
-          if (role.getRules() != null) {
-            for (Map.Entry<String, Byte> rule : role.getRules().entrySet()) {
-              json.beginObject();
-              json.writeAttribute("name", rule.getKey());
-              json.writeAttribute("create", role.allow(rule.getKey(), ORole.PERMISSION_CREATE));
-              json.writeAttribute("read", role.allow(rule.getKey(), ORole.PERMISSION_READ));
-              json.writeAttribute("update", role.allow(rule.getKey(), ORole.PERMISSION_UPDATE));
-              json.writeAttribute("delete", role.allow(rule.getKey(), ORole.PERMISSION_DELETE));
-              json.endObject();
-            }
-          }
-          json.endCollection();
-
-          json.endObject();
-        }
-        json.endCollection();
+        //exportSecurityInfo(db, json);
       }
       final OIndexManagerProxy idxManager = db.getMetadata().getIndexManager();
       json.beginCollection("indexes");
@@ -289,8 +264,8 @@ public class OServerCommandGetDatabase extends OServerCommandGetConnect {
       json.endCollection();
 
       json.beginCollection("properties");
-      if (db.getStorage().getConfiguration().properties != null)
-        for (OStorageEntryConfiguration entry : db.getStorage().getConfiguration().properties) {
+      if (db.getStorage().getConfiguration().getProperties() != null)
+        for (OStorageEntryConfiguration entry : db.getStorage().getConfiguration().getProperties()) {
           if (entry != null) {
             json.beginObject();
             json.writeAttribute("name", entry.name);
@@ -309,5 +284,43 @@ public class OServerCommandGetDatabase extends OServerCommandGetConnect {
       if (db != null)
         db.close();
     }
+  }
+
+  private void exportSecurityInfo(ODatabaseDocumentTx db, OJSONWriter json) throws IOException {
+    json.beginCollection("users");
+    for (ODocument doc : db.getMetadata().getSecurity().getAllUsers()) {
+      OUser user = new OUser(doc);
+      json.beginObject();
+      json.writeAttribute("name", user.getName());
+      json.writeAttribute("roles", user.getRoles() != null ? Arrays.toString(user.getRoles().toArray()) : "null");
+      json.endObject();
+    }
+    json.endCollection();
+
+    json.beginCollection("roles");
+    ORole role;
+    for (ODocument doc : db.getMetadata().getSecurity().getAllRoles()) {
+      role = new ORole(doc);
+      json.beginObject();
+      json.writeAttribute("name", role.getName());
+      json.writeAttribute("mode", role.getMode().toString());
+
+      json.beginCollection("rules");
+      if (role.getRules() != null) {
+        for (Map.Entry<String, Byte> rule : role.getRules().entrySet()) {
+          json.beginObject();
+          json.writeAttribute("name", rule.getKey());
+          json.writeAttribute("create", role.allow(rule.getKey(), ORole.PERMISSION_CREATE));
+          json.writeAttribute("read", role.allow(rule.getKey(), ORole.PERMISSION_READ));
+          json.writeAttribute("update", role.allow(rule.getKey(), ORole.PERMISSION_UPDATE));
+          json.writeAttribute("delete", role.allow(rule.getKey(), ORole.PERMISSION_DELETE));
+          json.endObject();
+        }
+      }
+      json.endCollection();
+
+      json.endObject();
+    }
+    json.endCollection();
   }
 }

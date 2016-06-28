@@ -21,6 +21,7 @@ import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.iterator.ORecordIteratorCluster;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.metadata.schema.OSchema;
+import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.sql.OCommandSQL;
 import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
@@ -217,7 +218,7 @@ public class SQLUpdateTest extends DocumentDBBaseTest {
 
   }
 
-  @Test
+  @Test(dependsOnMethods = "updateAllOperator")
   public void updateWithWildcards() {
 
     int updated = database.command(new OCommandSQL("update Profile set sex = ? where sex = 'male' limit 1")).execute("male");
@@ -507,14 +508,14 @@ public class SQLUpdateTest extends DocumentDBBaseTest {
 
     database.command(new OCommandSQL("update UpdateEdgeContentE content {value : 'val'}")).execute();
 
-		result = database.query(new OSQLSynchQuery<ODocument>("select outV(), inV() from UpdateEdgeContentE"));
+    result = database.query(new OSQLSynchQuery<ODocument>("select outV(), inV() from UpdateEdgeContentE"));
 
-		Assert.assertEquals(result.size(), 3);
+    Assert.assertEquals(result.size(), 3);
 
-		for (ODocument doc : result) {
-			Assert.assertEquals(doc.field("outV"), vOneId);
-			Assert.assertEquals(doc.field("inV"), vTwoId);
-		}
+    for (ODocument doc : result) {
+      Assert.assertEquals(doc.field("outV"), vOneId);
+      Assert.assertEquals(doc.field("inV"), vTwoId);
+    }
 
     result = database.query(new OSQLSynchQuery<ODocument>("select from UpdateEdgeContentE"));
     Assert.assertEquals(result.size(), 3);
@@ -543,5 +544,57 @@ public class SQLUpdateTest extends DocumentDBBaseTest {
       positions.add(doc.getIdentity().getClusterPosition());
     }
     return positions;
+  }
+
+  public void testMultiplePut() {
+    final ODocument v = database.newInstance("V").save();
+
+    Integer records = database.command(
+        new OCommandSQL("UPDATE " + v.getIdentity() + " PUT embmap = \"test\", \"Luca\" PUT embmap = \"test2\", \"Alex\""))
+        .execute();
+
+    Assert.assertEquals(records.intValue(), 1);
+
+    v.reload();
+
+    Assert.assertTrue(v.field("embmap") instanceof Map);
+    Assert.assertEquals(((Map) v.field("embmap")).size(), 2);
+  }
+
+  public void testAutoConversionOfEmbeddededListWithLinkedClass() {
+    OClass c = database.getMetadata().getSchema().getOrCreateClass("TestConvert");
+    if (!c.existsProperty("embeddedListWithLinkedClass"))
+      c.createProperty("embeddedListWithLinkedClass", OType.EMBEDDEDLIST,
+          database.getMetadata().getSchema().getOrCreateClass("TestConvertLinkedClass"));
+
+    ODocument doc = database
+        .command(
+            new OCommandSQL(
+                "INSERT INTO TestConvert SET name = 'embeddedListWithLinkedClass', embeddedListWithLinkedClass = [{'line1':'123 Fake Street'}]"))
+        .execute();
+
+    database.command(
+        new OCommandSQL("UPDATE " + doc.getIdentity() + " ADD embeddedListWithLinkedClass = [{'line1':'123 Fake Street'}]"))
+        .execute();
+
+    doc.reload();
+
+    Assert.assertTrue(doc.field("embeddedListWithLinkedClass") instanceof List);
+    Assert.assertEquals(((Collection) doc.field("embeddedListWithLinkedClass")).size(), 2);
+
+    database.command(
+        new OCommandSQL("UPDATE " + doc.getIdentity() + " ADD embeddedListWithLinkedClass = {'line1':'123 Fake Street'}"))
+        .execute();
+
+    doc.reload();
+
+    Assert.assertTrue(doc.field("embeddedListWithLinkedClass") instanceof List);
+    Assert.assertEquals(((Collection) doc.field("embeddedListWithLinkedClass")).size(), 3);
+
+    List addr = doc.field("embeddedListWithLinkedClass");
+    for (Object o : addr) {
+      Assert.assertTrue(o instanceof ODocument);
+      Assert.assertEquals(((ODocument) o).getClassName(), "TestConvertLinkedClass");
+    }
   }
 }

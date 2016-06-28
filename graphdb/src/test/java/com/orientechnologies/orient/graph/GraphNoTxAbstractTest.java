@@ -20,12 +20,8 @@
 
 package com.orientechnologies.orient.graph;
 
-import com.orientechnologies.common.io.OFileUtils;
 import com.tinkerpop.blueprints.impls.orient.OrientGraphNoTx;
 import org.junit.AfterClass;
-import org.junit.BeforeClass;
-
-import java.io.File;
 
 /**
  * Base class for tests against Non transactonal Graphs.
@@ -60,19 +56,24 @@ public abstract class GraphNoTxAbstractTest {
     return "plocal";
   }
 
-  @BeforeClass
-  public static void beforeClass() {
-    final String dbName = GraphNoTxAbstractTest.class.getSimpleName();
+  public static void init(final String dbName) {
     final String storageType = getStorageType();
     final String buildDirectory = System.getProperty("buildDirectory", ".");
 
-    OFileUtils.deleteRecursively(new File(buildDirectory + "/" + dbName));
+//    OFileUtils.deleteRecursively(new File(buildDirectory + "/" + dbName));
 
-    graph = new OrientGraphNoTx(storageType + ":" + buildDirectory + "/" + dbName);
+    final String url = System.getProperty("url");
+    if (url != null)
+      graph = new OrientGraphNoTx(url);
+    else
+      graph = new OrientGraphNoTx(storageType + ":" + buildDirectory + "/" + dbName);
   }
 
   @AfterClass
   public static void afterClass() throws Exception {
-    graph.shutdown();
+    if (graph != null) {
+      graph.shutdown();
+      graph = null;
+    }
   }
 }

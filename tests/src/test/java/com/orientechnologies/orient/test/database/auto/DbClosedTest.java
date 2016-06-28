@@ -15,41 +15,55 @@
  */
 package com.orientechnologies.orient.test.database.auto;
 
+import com.orientechnologies.orient.core.db.OPartitionedDatabasePool;
+import org.testng.annotations.*;
+
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.db.ODatabase;
-import com.orientechnologies.orient.core.db.document.ODatabaseDocumentPool;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
-import com.orientechnologies.orient.object.db.OObjectDatabasePool;
 import com.orientechnologies.orient.object.db.OObjectDatabaseTx;
 import com.orientechnologies.orient.test.database.base.SetupTest;
-import org.testng.annotations.Optional;
-import org.testng.annotations.Parameters;
-import org.testng.annotations.Test;
 
 @Test(groups = "db")
 public class DbClosedTest extends DocumentDBBaseTest {
+  private OPartitionedDatabasePool pool;
+
   @Parameters(value = { "url" })
   public DbClosedTest(@Optional String url) {
     super(url);
+    setAutoManageDatabase(false);
+    setDropDb(true);
+  }
+
+  @BeforeClass
+  public void before() {
+    pool = new OPartitionedDatabasePool(url, "admin", "admin");
+  }
+
+  @AfterClass
+  public void after() {
+    pool.close();
   }
 
   public void testDoubleDb() {
-    OObjectDatabaseTx db = OObjectDatabasePool.global().acquire(url, "admin", "admin");
+    ODatabaseDocumentTx db = pool.acquire();
 
     // now I am getting another db instance
-    OObjectDatabaseTx dbAnother = OObjectDatabasePool.global().acquire(url, "admin", "admin");
+    ODatabaseDocumentTx dbAnother = pool.acquire();
     dbAnother.close();
 
+    db.activateOnCurrentThread();
     db.close();
   }
 
   public void testDoubleDbWindowsPath() {
-    OObjectDatabaseTx db = OObjectDatabasePool.global().acquire(url.replace('/', '\\'), "admin", "admin");
+    ODatabaseDocumentTx db = pool.acquire();
 
     // now I am getting another db instance
-    OObjectDatabaseTx dbAnother = OObjectDatabasePool.global().acquire(url, "admin", "admin");
+    ODatabaseDocumentTx dbAnother = pool.acquire();
     dbAnother.close();
 
+    db.activateOnCurrentThread();
     db.close();
   }
 
@@ -57,9 +71,6 @@ public class DbClosedTest extends DocumentDBBaseTest {
   public void testStorageClosed() {
     if (SetupTest.instance().isReuseDatabase())
       return;
-
-    ODatabaseDocumentPool.global().close();
-    OObjectDatabasePool.global().close();
   }
 
   @Test

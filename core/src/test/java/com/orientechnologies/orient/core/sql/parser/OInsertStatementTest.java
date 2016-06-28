@@ -1,18 +1,18 @@
 package com.orientechnologies.orient.core.sql.parser;
 
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
+import org.testng.annotations.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 
-import org.testng.annotations.Test;
+import static org.testng.Assert.fail;
 
 @Test
 public class OInsertStatementTest {
 
   protected SimpleNode checkRightSyntax(String query) {
-    return checkSyntax(query, true);
+    SimpleNode result = checkSyntax(query, true);
+    return checkSyntax(result.toString(), true);
   }
 
   protected SimpleNode checkWrongSyntax(String query) {
@@ -50,9 +50,39 @@ public class OInsertStatementTest {
 
   public void testInsertIntoCluster() {
     checkRightSyntax("insert into cluster:default (equaledges, name, list) values ('yes', 'square', ['bottom', 'top','left','right'] )");
+    checkRightSyntax("insert into CLUSTER:default (equaledges, name, list) values ('yes', 'square', ['bottom', 'top','left','right'] )");
+
+    checkRightSyntax("insert into Foo cluster foo1 (equaledges, name, list) values ('yes', 'square', ['bottom', 'top','left','right'] )");
+    checkRightSyntax("insert into Foo CLUSTER foo1 (equaledges, name, list) values ('yes', 'square', ['bottom', 'top','left','right'] )");
 
   }
 
+  public void testInsertSelectTimeout() {
+    checkRightSyntax("insert into foo return foo select from bar TIMEOUT 10 ");
+    checkRightSyntax("insert into foo return foo select from bar TIMEOUT 10 return");
+    checkRightSyntax("insert into foo return foo select from bar TIMEOUT 10 exception");
+  }
+
+  public void testInsertInsert() {
+    checkRightSyntax("insert into foo set bar = (insert into foo set a = 'foo') ");
+//    checkRightSyntax("insert into foo set bar = (select from foo) ");
+  }
+
+    public void testInsertEmbeddedDocs() {
+    checkRightSyntax("INSERT INTO Activity SET user = #14:1, story = #18:2, `like` = { \n"
+        + "      count: 0, \n"
+        + "      latest: [], \n"
+        + "      '@type': 'document', \n"
+        + "      '@class': 'Like'\n"
+        + "    }");
+
+    checkRightSyntax("INSERT INTO Activity SET user = #14:1, story = #18:2, `like` = { \n"
+        + "      count: 0, \n"
+        + "      latest: [], \n"
+        + "      '@type': 'document', \n"
+        + "      '@class': 'Like'\n"
+        + "    }");
+  }
 
 
 

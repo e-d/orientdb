@@ -36,6 +36,7 @@ import com.orientechnologies.orient.core.db.ODatabaseInternal;
 import com.orientechnologies.orient.core.db.ODatabaseLifecycleListener;
 import com.orientechnologies.orient.core.db.OScenarioThreadLocal;
 import com.orientechnologies.orient.core.exception.OConfigurationException;
+import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.storage.OStorage;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
@@ -50,33 +51,47 @@ import com.orientechnologies.orient.server.plugin.OServerPluginAbstract;
  * @author Luca Garulli (l.garulli--at--orientechnologies.com)
  *
  */
-public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract implements ODistributedServerManager,
-    ODatabaseLifecycleListener {
-  public static final String                               REPLICATOR_USER             = "replicator";
-  protected static final String                            MASTER_AUTO                 = "$auto";
+public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract
+    implements ODistributedServerManager, ODatabaseLifecycleListener {
+  public static final String    REPLICATOR_USER = "replicator";
+  protected static final String MASTER_AUTO     = "$auto";
 
-  protected static final String                            PAR_DEF_DISTRIB_DB_CONFIG   = "configuration.db.default";
-  protected static final String                            FILE_DISTRIBUTED_DB_CONFIG  = "distributed-config.json";
+  protected static final String PAR_DEF_DISTRIB_DB_CONFIG  = "configuration.db.default";
+  protected static final String FILE_DISTRIBUTED_DB_CONFIG = "distributed-config.json";
 
-  protected OServer                                        serverInstance;
-  protected Map<String, ODocument>                         cachedDatabaseConfiguration = new HashMap<String, ODocument>();
+  protected OServer                serverInstance;
+  protected Map<String, ODocument> cachedDatabaseConfiguration = new HashMap<String, ODocument>();
 
-  protected boolean                                        enabled                     = true;
-  protected String                                         nodeName                    = null;
+  protected boolean                                        enabled  = true;
+  protected String                                         nodeName = null;
   protected File                                           defaultDatabaseConfigFile;
-  protected ConcurrentHashMap<String, ODistributedStorage> storages                    = new ConcurrentHashMap<String, ODistributedStorage>();
+  protected ConcurrentHashMap<String, ODistributedStorage> storages = new ConcurrentHashMap<String, ODistributedStorage>();
 
-  public static Object runInDistributedMode(Callable iCall) throws Exception {
-    final OScenarioThreadLocal.RUN_MODE currentRunningMode = OScenarioThreadLocal.INSTANCE.get();
+  public static Object runInDistributedMode(final Callable iCall) throws Exception {
+    final OScenarioThreadLocal.RUN_MODE currentRunningMode = OScenarioThreadLocal.INSTANCE.getRunMode();
     if (currentRunningMode != OScenarioThreadLocal.RUN_MODE.RUNNING_DISTRIBUTED)
-      OScenarioThreadLocal.INSTANCE.set(OScenarioThreadLocal.RUN_MODE.RUNNING_DISTRIBUTED);
+      OScenarioThreadLocal.INSTANCE.setRunMode(OScenarioThreadLocal.RUN_MODE.RUNNING_DISTRIBUTED);
 
     try {
       return iCall.call();
     } finally {
 
       if (currentRunningMode != OScenarioThreadLocal.RUN_MODE.RUNNING_DISTRIBUTED)
-        OScenarioThreadLocal.INSTANCE.set(OScenarioThreadLocal.RUN_MODE.DEFAULT);
+        OScenarioThreadLocal.INSTANCE.setRunMode(currentRunningMode);
+    }
+  }
+
+  public static Object runInDefaultMode(final Callable iCall) throws Exception {
+    final OScenarioThreadLocal.RUN_MODE currentRunningMode = OScenarioThreadLocal.INSTANCE.getRunMode();
+    if (currentRunningMode != OScenarioThreadLocal.RUN_MODE.DEFAULT)
+      OScenarioThreadLocal.INSTANCE.setRunMode(OScenarioThreadLocal.RUN_MODE.DEFAULT);
+
+    try {
+      return iCall.call();
+    } finally {
+
+      if (currentRunningMode != OScenarioThreadLocal.RUN_MODE.DEFAULT)
+        OScenarioThreadLocal.INSTANCE.setRunMode(currentRunningMode);
     }
   }
 
@@ -98,12 +113,12 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract i
           enabled = false;
           return;
         }
-      } else if (param.name.equalsIgnoreCase("nodeName"))
+      } else if (param.name.equalsIgnoreCase("nodeName")) {
         nodeName = param.value;
-      else if (param.name.startsWith(PAR_DEF_DISTRIB_DB_CONFIG)) {
+        if (nodeName.contains("."))
+          throw new OConfigurationException("Illegal node name '" + nodeName + "'. '.' is not allowed in node name");
+      } else if (param.name.startsWith(PAR_DEF_DISTRIB_DB_CONFIG)) {
         setDefaultDatabaseConfigFile(param.value);
-      } else if (param.name.equalsIgnoreCase("conflict.resolver.impl")) {
-        // NOT USED ANYMORE
       }
     }
 
@@ -197,6 +212,22 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract i
   }
 
   @Override
+  public void onDrop(final ODatabaseInternal iDatabase) {
+    synchronized (cachedDatabaseConfiguration) {
+      storages.remove(iDatabase.getURL());
+    }
+
+    final ODistributedMessageService msgService = getMessageService();
+    if (msgService != null) {
+      msgService.unregisterDatabase(iDatabase.getName());
+    }
+  }
+
+  @Override
+  public void onDropClass(ODatabaseInternal iDatabase, OClass iClass) {
+  }
+
+  @Override
   public void sendShutdown() {
     super.sendShutdown();
   }
@@ -215,15 +246,17 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract i
       ODocument oldCfg = cachedDatabaseConfiguration.get(iDatabaseName);
       Integer oldVersion = oldCfg != null ? (Integer) oldCfg.field("version") : null;
       if (oldVersion == null)
-        oldVersion = 1;
+        oldVersion = 0;
 
       Integer currVersion = (Integer) cfg.field("version");
       if (currVersion == null)
-        currVersion = 1;
+        currVersion = 0;
+
+      final boolean modified = currVersion >= oldVersion;
 
       if (oldCfg != null && oldVersion > currVersion) {
         // NO CHANGE, SKIP IT
-        OLogManager.instance().warn(this,
+        OLogManager.instance().debug(this,
             "Skip saving of distributed configuration file for database '%s' because is unchanged (version %d)", iDatabaseName,
             (Integer) cfg.field("version"));
         return false;
@@ -266,8 +299,8 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract i
             }
         }
       }
+      return modified;
     }
-    return true;
   }
 
   public ODistributedConfiguration getDatabaseConfiguration(final String iDatabaseName) {

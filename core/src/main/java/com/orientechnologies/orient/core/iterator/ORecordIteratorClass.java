@@ -50,25 +50,25 @@ public class ORecordIteratorClass<REC extends ORecord> extends ORecordIteratorCl
    */
   public ORecordIteratorClass(final ODatabaseDocumentInternal iDatabase, final ODatabaseDocumentTx iLowLevelDatabase,
       final String iClassName, final boolean iPolymorphic) {
-    this(iDatabase, iLowLevelDatabase, iClassName, iPolymorphic, true, false);
+    this(iDatabase, iLowLevelDatabase, iClassName, iPolymorphic, true);
   }
 
   public ORecordIteratorClass(final ODatabaseDocumentInternal iDatabase, final ODatabaseDocumentInternal iLowLevelDatabase,
       final String iClassName, final boolean iPolymorphic) {
-    this(iDatabase, iLowLevelDatabase, iClassName, iPolymorphic, true, false);
+    this(iDatabase, iLowLevelDatabase, iClassName, iPolymorphic, true);
   }
 
   public ORecordIteratorClass(final ODatabaseDocumentInternal iDatabase, final ODatabaseDocumentInternal iLowLevelDatabase,
-      final String iClassName, final boolean iPolymorphic, final boolean iUseCache, final boolean iterateThroughTombstones) {
-    this(iDatabase, iLowLevelDatabase, iClassName, iPolymorphic, iUseCache, iterateThroughTombstones,
-        OStorage.LOCKING_STRATEGY.DEFAULT);
+      final String iClassName, final boolean iPolymorphic, final boolean iterateThroughTombstones) {
+    this(iDatabase, iLowLevelDatabase, iClassName, iPolymorphic, iterateThroughTombstones, OStorage.LOCKING_STRATEGY.DEFAULT);
     begin();
   }
 
+  @Deprecated
   public ORecordIteratorClass(final ODatabaseDocumentInternal iDatabase, final ODatabaseDocumentInternal iLowLevelDatabase,
-      final String iClassName, final boolean iPolymorphic, final boolean iUseCache, final boolean iterateThroughTombstones,
+      final String iClassName, final boolean iPolymorphic, final boolean iterateThroughTombstones,
       final OStorage.LOCKING_STRATEGY iLockingStrategy) {
-    super(iDatabase, iLowLevelDatabase, iUseCache, iterateThroughTombstones, iLockingStrategy);
+    super(iDatabase, iLowLevelDatabase, iterateThroughTombstones, iLockingStrategy);
 
     targetClass = ((OMetadataInternal) database.getMetadata()).getImmutableSchemaSnapshot().getClass(iClassName);
     if (targetClass == null)
@@ -77,6 +77,8 @@ public class ORecordIteratorClass<REC extends ORecord> extends ORecordIteratorCl
     polymorphic = iPolymorphic;
     clusterIds = polymorphic ? targetClass.getPolymorphicClusterIds() : targetClass.getClusterIds();
     clusterIds = OClassImpl.readableClusters(iDatabase, clusterIds);
+
+    checkForSystemClusters(iDatabase, clusterIds);
 
     Arrays.sort(clusterIds);
     config();
@@ -114,6 +116,10 @@ public class ORecordIteratorClass<REC extends ORecord> extends ORecordIteratorCl
   protected boolean include(final ORecord record) {
     return record instanceof ODocument
         && targetClass.isSuperClassOf(ODocumentInternal.getImmutableSchemaClass(((ODocument) record)));
+  }
+
+  public OClass getTargetClass() {
+    return targetClass;
   }
 
   @Override

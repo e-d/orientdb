@@ -1,5 +1,7 @@
 package com.orientechnologies.orient.core.sql.parser;
 
+import java.util.Map;
+
 /**
  * Created by luigidellaquila on 06/02/15.
  */
@@ -7,6 +9,7 @@ public class OOrderByItem {
   public static final String ASC  = "ASC";
   public static final String DESC = "DESC";
   protected String           alias;
+  protected OModifier        modifier;
   protected String           recordAttr;
   protected ORid             rid;
   protected String           type = ASC;
@@ -48,6 +51,9 @@ public class OOrderByItem {
     StringBuilder result = new StringBuilder();
     if (alias != null) {
       result.append(alias);
+      if (modifier != null) {
+        result.append(modifier.toString());
+      }
     } else if (recordAttr != null) {
       result.append(recordAttr);
     } else if (rid != null) {
@@ -57,5 +63,11 @@ public class OOrderByItem {
       result.append(" " + type);
     }
     return result.toString();
+  }
+
+  public void replaceParameters(Map<Object, Object> params) {
+    if(modifier!=null){
+      modifier.replaceParameters(params);
+    }
   }
 }

@@ -24,10 +24,15 @@ import com.orientechnologies.orient.core.command.OCommandDistributedReplicateReq
 import com.orientechnologies.orient.core.command.OCommandRequest;
 import com.orientechnologies.orient.core.command.OCommandRequestText;
 import com.orientechnologies.orient.core.command.OCommandResultListener;
+import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
-import com.orientechnologies.orient.core.index.*;
+import com.orientechnologies.orient.core.index.OCompositeIndexDefinition;
+import com.orientechnologies.orient.core.index.OCompositeKey;
+import com.orientechnologies.orient.core.index.OIndex;
+import com.orientechnologies.orient.core.index.OIndexCursor;
+import com.orientechnologies.orient.core.index.OIndexDefinition;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.metadata.security.ORole;
 import com.orientechnologies.orient.core.record.ORecord;
@@ -35,6 +40,7 @@ import com.orientechnologies.orient.core.record.ORecordAbstract;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.sql.filter.OSQLFilter;
 import com.orientechnologies.orient.core.sql.filter.OSQLFilterCondition;
+import com.orientechnologies.orient.core.sql.parser.ODeleteStatement;
 import com.orientechnologies.orient.core.sql.query.OSQLAsynchQuery;
 import com.orientechnologies.orient.core.sql.query.OSQLQuery;
 import com.orientechnologies.orient.core.storage.OStorage;
@@ -76,9 +82,7 @@ public class OCommandExecutorSQLDelete extends OCommandExecutorSQLAbstract imple
     String queryText = textRequest.getText();
     String originalQuery = queryText;
     try {
-//      System.out.println("NEW PARSER FROM: " + queryText);
       queryText = preParse(queryText, iRequest);
-//      System.out.println("NEW PARSER   TO: " + queryText);
       textRequest.setText(queryText);
       final ODatabaseDocument database = getDatabase();
 
@@ -127,7 +131,24 @@ public class OCommandExecutorSQLDelete extends OCommandExecutorSQLAbstract imple
       } else if (subjectName.startsWith("(")) {
         subjectName = subjectName.trim();
         query = database.command(new OSQLAsynchQuery<ODocument>(subjectName.substring(1, subjectName.length() - 1), this));
+        parserNextWord(true);
+        if (!parserIsEnded()) {
+          while (!parserIsEnded()) {
+            final String word = parserGetLastWord();
 
+            if (word.equals(KEYWORD_LOCK))
+              lockStrategy = parseLock();
+            else if (word.equals(KEYWORD_RETURN))
+              returning = parseReturn();
+            else if (word.equals(KEYWORD_UNSAFE))
+              unsafe = true;
+            else if (word.equalsIgnoreCase(KEYWORD_WHERE))
+              compiledFilter = OSQLEngine.getInstance()
+                  .parseCondition(parserText.substring(parserGetCurrentPosition()), getContext(), KEYWORD_WHERE);
+
+            parserNextWord(true);
+          }
+        }
       } else {
         parserNextWord(true);
 
@@ -147,7 +168,7 @@ public class OCommandExecutorSQLDelete extends OCommandExecutorSQLAbstract imple
         }
 
         final String condition = parserGetCurrentPosition() > -1 ? " " + parserText.substring(parserGetCurrentPosition()) : "";
-        query = database.command(new OSQLAsynchQuery<ODocument>("select from " + subjectName + condition, this));
+        query = database.command(new OSQLAsynchQuery<ODocument>("select from " + getSelectTarget(subjectName) + condition, this));
       }
     } finally {
       textRequest.setText(originalQuery);
@@ -155,6 +176,14 @@ public class OCommandExecutorSQLDelete extends OCommandExecutorSQLAbstract imple
 
     return this;
   }
+
+  private String getSelectTarget(String subjectName) {
+    if(preParsedStatement == null){
+      return subjectName;
+    }
+    return ((ODeleteStatement)preParsedStatement).fromClause.toString();
+  }
+
 
   public Object execute(final Map<Object, Object> iArgs) {
     if (query == null && indexName == null)
@@ -165,10 +194,16 @@ public class OCommandExecutorSQLDelete extends OCommandExecutorSQLAbstract imple
 
     if (query != null) {
       // AGAINST CLUSTERS AND CLASSES
+      query.setContext(getContext());
+
+      Object prevLockValue = query.getContext().getVariable("$locking");
+
       if (lockStrategy.equals("RECORD"))
-        query.getContext().setVariable("$locking", OStorage.LOCKING_STRATEGY.KEEP_EXCLUSIVE_LOCK);
+        query.getContext().setVariable("$locking", OStorage.LOCKING_STRATEGY.EXCLUSIVE_LOCK);
 
       query.execute(iArgs);
+
+      query.getContext().setVariable("$locking", prevLockValue);
 
       if (returning.equalsIgnoreCase("COUNT"))
         // RETURNS ONLY THE COUNT
@@ -249,12 +284,20 @@ public class OCommandExecutorSQLDelete extends OCommandExecutorSQLAbstract imple
     }
   }
 
+  @Override
+  public long getDistributedTimeout() {
+    return OGlobalConfiguration.DISTRIBUTED_COMMAND_TASK_SYNCH_TIMEOUT.getValueAsLong();
+  }
+
   /**
    * Deletes the current record.
    */
   public boolean result(final Object iRecord) {
-    final ORecordAbstract record = (ORecordAbstract) iRecord;
+    final ORecordAbstract record = ((OIdentifiable) iRecord).getRecord();
 
+    if(record instanceof ODocument && compiledFilter!=null && !Boolean.TRUE.equals(this.compiledFilter.evaluate(record, (ODocument)record, getContext()))){
+      return true;
+    }
     try {
       if (record.getIdentity().isValid()) {
         if (returning.equalsIgnoreCase("BEFORE"))
@@ -290,13 +333,8 @@ public class OCommandExecutorSQLDelete extends OCommandExecutorSQLAbstract imple
     }
   }
 
-  @Override
-  public OCommandDistributedReplicateRequest.DISTRIBUTED_EXECUTION_MODE getDistributedExecutionMode() {
-    return indexName != null ? DISTRIBUTED_EXECUTION_MODE.REPLICATE : DISTRIBUTED_EXECUTION_MODE.LOCAL;
-  }
-
   public String getSyntax() {
-    return "DELETE FROM <Class>|RID|cluster:<cluster> [UNSAFE] [LOCK <NONE|RECORD>] [RETURNING <COUNT|BEFORE>] [WHERE <condition>*]";
+    return "DELETE FROM <Class>|RID|cluster:<cluster> [UNSAFE] [LOCK <NONE|RECORD>] [RETURN <COUNT|BEFORE>] [WHERE <condition>*]";
   }
 
   @Override
@@ -312,8 +350,7 @@ public class OCommandExecutorSQLDelete extends OCommandExecutorSQLAbstract imple
    * Parses the returning keyword if found.
    */
   protected String parseReturn() throws OCommandSQLParsingException {
-    parserNextWord(true);
-    final String returning = parserGetLastWord();
+    final String returning = parserNextWord(true);
 
     if (!returning.equalsIgnoreCase("COUNT") && !returning.equalsIgnoreCase("BEFORE"))
       throwParsingException("Invalid " + KEYWORD_RETURN + " value set to '" + returning
@@ -343,5 +380,21 @@ public class OCommandExecutorSQLDelete extends OCommandExecutorSQLAbstract imple
     } else {
       return OSQLHelper.getValue(value);
     }
+  }
+
+  @Override
+  public QUORUM_TYPE getQuorumType() {
+    return QUORUM_TYPE.WRITE;
+  }
+
+  @Override
+  public OCommandDistributedReplicateRequest.DISTRIBUTED_EXECUTION_MODE getDistributedExecutionMode() {
+    return (indexName != null || query != null) && !getDatabase().getTransaction().isActive() ? DISTRIBUTED_EXECUTION_MODE.REPLICATE
+        : DISTRIBUTED_EXECUTION_MODE.LOCAL;
+  }
+
+  public DISTRIBUTED_RESULT_MGMT getDistributedResultManagement() {
+    return getDistributedExecutionMode() == DISTRIBUTED_EXECUTION_MODE.LOCAL ? DISTRIBUTED_RESULT_MGMT.CHECK_FOR_EQUALS
+        : DISTRIBUTED_RESULT_MGMT.MERGE;
   }
 }

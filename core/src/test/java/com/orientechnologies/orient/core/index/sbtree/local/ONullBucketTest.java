@@ -1,10 +1,10 @@
 package com.orientechnologies.orient.core.index.sbtree.local;
 
 import com.orientechnologies.common.directmemory.ODirectMemoryPointer;
+import com.orientechnologies.common.directmemory.ODirectMemoryPointerFactory;
 import com.orientechnologies.common.serialization.types.OStringSerializer;
-import com.orientechnologies.orient.core.index.hashindex.local.cache.OCacheEntry;
-import com.orientechnologies.orient.core.index.hashindex.local.cache.OCachePointer;
-import com.orientechnologies.orient.core.storage.impl.local.paginated.base.ODurablePage;
+import com.orientechnologies.orient.core.storage.cache.OCacheEntry;
+import com.orientechnologies.orient.core.storage.cache.OCachePointer;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OLogSequenceNumber;
 import org.testng.Assert;
 import org.testng.annotations.Test;
@@ -18,19 +18,26 @@ import java.io.IOException;
 @Test
 public class ONullBucketTest {
   public void testEmptyBucket() {
-    ODirectMemoryPointer pointer = new ODirectMemoryPointer(1024);
-    OCachePointer cachePointer = new OCachePointer(pointer, new OLogSequenceNumber(0, 0));
+    ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(1024);
+    OCachePointer cachePointer = new OCachePointer(pointer, new OLogSequenceNumber(0, 0), 0, 0);
+    cachePointer.incrementReferrer();
+    cachePointer.acquireExclusiveLock();
+
     OCacheEntry cacheEntry = new OCacheEntry(0, 0, cachePointer, false);
 
     ONullBucket<String> bucket = new ONullBucket<String>(cacheEntry, null, OStringSerializer.INSTANCE, true);
     Assert.assertNull(bucket.getValue());
 
+    cachePointer.releaseExclusiveLock();
     cachePointer.decrementReferrer();
   }
 
   public void testAddGetValue() throws IOException {
-    ODirectMemoryPointer pointer = new ODirectMemoryPointer(1024);
-    OCachePointer cachePointer = new OCachePointer(pointer, new OLogSequenceNumber(0, 0));
+    ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(1024);
+    OCachePointer cachePointer = new OCachePointer(pointer, new OLogSequenceNumber(0, 0), 0, 0);
+    cachePointer.incrementReferrer();
+    cachePointer.acquireExclusiveLock();
+
     OCacheEntry cacheEntry = new OCacheEntry(0, 0, cachePointer, false);
 
     ONullBucket<String> bucket = new ONullBucket<String>(cacheEntry, null, OStringSerializer.INSTANCE, true);
@@ -39,12 +46,16 @@ public class ONullBucketTest {
     OSBTreeValue<String> treeValue = bucket.getValue();
     Assert.assertEquals(treeValue.getValue(), "test");
 
+    cachePointer.releaseExclusiveLock();
     cachePointer.decrementReferrer();
   }
 
   public void testAddRemoveValue() throws IOException {
-    ODirectMemoryPointer pointer = new ODirectMemoryPointer(1024);
-    OCachePointer cachePointer = new OCachePointer(pointer, new OLogSequenceNumber(0, 0));
+    ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(1024);
+    OCachePointer cachePointer = new OCachePointer(pointer, new OLogSequenceNumber(0, 0), 0, 0);
+    cachePointer.incrementReferrer();
+    cachePointer.acquireExclusiveLock();
+
     OCacheEntry cacheEntry = new OCacheEntry(0, 0, cachePointer, false);
 
     ONullBucket<String> bucket = new ONullBucket<String>(cacheEntry, null, OStringSerializer.INSTANCE, true);
@@ -55,12 +66,16 @@ public class ONullBucketTest {
     OSBTreeValue<String> treeValue = bucket.getValue();
     Assert.assertNull(treeValue);
 
+    cachePointer.releaseExclusiveLock();
     cachePointer.decrementReferrer();
   }
 
   public void testAddRemoveAddValue() throws IOException {
-    ODirectMemoryPointer pointer = new ODirectMemoryPointer(1024);
-    OCachePointer cachePointer = new OCachePointer(pointer, new OLogSequenceNumber(0, 0));
+    ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(1024);
+    OCachePointer cachePointer = new OCachePointer(pointer, new OLogSequenceNumber(0, 0), 0, 0);
+    cachePointer.incrementReferrer();
+    cachePointer.acquireExclusiveLock();
+
     OCacheEntry cacheEntry = new OCacheEntry(0, 0, cachePointer, false);
 
     ONullBucket<String> bucket = new ONullBucket<String>(cacheEntry, null, OStringSerializer.INSTANCE, true);
@@ -76,6 +91,7 @@ public class ONullBucketTest {
     treeValue = bucket.getValue();
     Assert.assertEquals(treeValue.getValue(), "testOne");
 
+    cachePointer.releaseExclusiveLock();
     cachePointer.decrementReferrer();
   }
 

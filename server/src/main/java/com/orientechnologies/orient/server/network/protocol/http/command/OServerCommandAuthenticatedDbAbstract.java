@@ -40,6 +40,7 @@ import com.orientechnologies.orient.server.network.protocol.http.OHttpSessionMan
 import com.orientechnologies.orient.server.network.protocol.http.OHttpUtils;
 
 import java.io.IOException;
+import java.net.URLDecoder;
 import java.util.List;
 
 /**
@@ -71,7 +72,7 @@ public abstract class OServerCommandAuthenticatedDbAbstract extends OServerComma
     if (urlParts.length < 2)
       throw new OHttpRequestException("Syntax error in URL. Expected is: <command>/<database>[/...]");
 
-    iRequest.databaseName = urlParts[1];
+    iRequest.databaseName = URLDecoder.decode(urlParts[1],"UTF-8");
     if (iRequest.bearerTokenRaw != null) {
       // Bearer authentication
       try {
@@ -202,12 +203,16 @@ public abstract class OServerCommandAuthenticatedDbAbstract extends OServerComma
     if (iRequest.authentication == null || iRequest.authentication.equalsIgnoreCase("basic")) {
       header = "WWW-Authenticate: Basic realm=\"OrientDB db-" + iDatabaseName + "\"";
     }
-    iResponse.send(OHttpUtils.STATUS_AUTH_CODE, OHttpUtils.STATUS_AUTH_DESCRIPTION, OHttpUtils.CONTENT_TEXT_PLAIN,
-        "401 Unauthorized.", header);
+    if (isJsonResponse(iResponse)) {
+      sendJsonError(iResponse, OHttpUtils.STATUS_AUTH_CODE, OHttpUtils.STATUS_AUTH_DESCRIPTION, OHttpUtils.CONTENT_TEXT_PLAIN,
+          "401 Unauthorized.", header);
+    } else {
+      iResponse.send(OHttpUtils.STATUS_AUTH_CODE, OHttpUtils.STATUS_AUTH_DESCRIPTION, OHttpUtils.CONTENT_TEXT_PLAIN,
+          "401 Unauthorized.", header);
+    }
   }
 
   protected ODatabaseDocumentTx getProfiledDatabaseInstance(final OHttpRequest iRequest) throws InterruptedException {
-    final OHttpSession session = OHttpSessionManager.getInstance().getSession(iRequest.sessionId);
     if (iRequest.bearerToken != null) {
       return getProfiledDatabaseInstanceToken(iRequest);
     } else {
@@ -223,7 +228,7 @@ public abstract class OServerCommandAuthenticatedDbAbstract extends OServerComma
     } else {
       ORID currentUserId = iRequest.bearerToken.getUserId();
       if (currentUserId != null && localDatabase != null && localDatabase.getUser() != null) {
-        if (!currentUserId.equals(localDatabase.getUser().getDocument().getIdentity().toString())) {
+        if (!currentUserId.equals(localDatabase.getUser().getDocument().getIdentity())) {
           ODocument userDoc = localDatabase.load(currentUserId);
           localDatabase.setUser(new OUser(userDoc));
         }
