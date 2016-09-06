@@ -257,7 +257,8 @@ public class OLocalHashTableWALTest extends OLocalHashTableTest {
     final OWriteCache expectedWriteCache = ((OAbstractPaginatedStorage) expectedDatabaseDocumentTx.getStorage()).getWriteCache();
 
     for (OWALRecord walRecord : records) {
-      atomicUnit.add(walRecord);
+      if (walRecord instanceof OOperationUnitBodyRecord)
+        atomicUnit.add(walRecord);
 
       if (!atomicChangeIsProcessed && walRecord instanceof OAtomicUnitStartRecord) {
         atomicChangeIsProcessed = true;
@@ -275,9 +276,6 @@ public class OLocalHashTableWALTest extends OLocalHashTableTest {
 
             final long fileId = updatePageRecord.getFileId();
             final long pageIndex = updatePageRecord.getPageIndex();
-
-            if (!expectedWriteCache.isOpen(fileId))
-              expectedReadCache.openFile(fileId, expectedWriteCache);
 
             OCacheEntry cacheEntry = expectedReadCache.load(fileId, pageIndex, true, expectedWriteCache, 1);
             if (cacheEntry == null)
@@ -298,9 +296,7 @@ public class OLocalHashTableWALTest extends OLocalHashTableTest {
             final OFileCreatedWALRecord fileCreatedCreatedRecord = (OFileCreatedWALRecord) restoreRecord;
             String fileName = fileCreatedCreatedRecord.getFileName().replace("actualLocalHashTable", "expectedLocalHashTable");
 
-            if (expectedWriteCache.exists(fileName))
-              expectedReadCache.openFile(fileName, fileCreatedCreatedRecord.getFileId(), expectedWriteCache);
-            else
+            if (!expectedWriteCache.exists(fileName))
               expectedReadCache.addFile(fileName, fileCreatedCreatedRecord.getFileId(), expectedWriteCache);
           }
         }
@@ -309,7 +305,8 @@ public class OLocalHashTableWALTest extends OLocalHashTableTest {
       } else {
         Assert.assertTrue(walRecord instanceof OUpdatePageRecord || walRecord instanceof OFileCreatedWALRecord
             || walRecord instanceof ONonTxOperationPerformedWALRecord || walRecord instanceof OFullCheckpointStartRecord
-            || walRecord instanceof OCheckpointEndRecord);
+            || walRecord instanceof OCheckpointEndRecord || walRecord instanceof OFuzzyCheckpointStartRecord
+            || walRecord instanceof OFuzzyCheckpointEndRecord);
       }
 
     }

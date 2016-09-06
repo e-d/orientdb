@@ -21,7 +21,11 @@ package com.orientechnologies.orient.stresstest;
 
 import com.orientechnologies.common.io.OIOUtils;
 import com.orientechnologies.common.log.OLogManager;
+import com.orientechnologies.orient.client.remote.OStorageRemote;
 import com.orientechnologies.orient.core.OConstants;
+import com.orientechnologies.orient.core.db.ODatabase;
+import com.orientechnologies.orient.core.sql.OCommandSQL;
+import com.orientechnologies.orient.stresstest.workload.OCheckWorkload;
 import com.orientechnologies.orient.stresstest.workload.OWorkload;
 import com.orientechnologies.orient.stresstest.workload.OWorkloadFactory;
 
@@ -44,22 +48,18 @@ public class OStressTester {
     PLOCAL, MEMORY, REMOTE, DISTRIBUTED
   }
 
-  private int                           threadsNumber;
-  private ODatabaseIdentifier           databaseIdentifier;
-  private int                           opsInTx;
-  private String                        outputResultFile;
+  private final ODatabaseIdentifier     databaseIdentifier;
   private OConsoleProgressWriter        consoleProgressWriter;
+  private final OStressTesterSettings   settings;
 
   private static final OWorkloadFactory workloadFactory = new OWorkloadFactory();
   private List<OWorkload>               workloads       = new ArrayList<OWorkload>();
 
-  public OStressTester(final List<OWorkload> workloads, ODatabaseIdentifier databaseIdentifier, int threadsNumber, int opsInTx,
-      String outputResultFile) throws Exception {
+  public OStressTester(final List<OWorkload> workloads, ODatabaseIdentifier databaseIdentifier,
+      final OStressTesterSettings settings) throws Exception {
     this.workloads = workloads;
-    this.threadsNumber = threadsNumber;
     this.databaseIdentifier = databaseIdentifier;
-    this.opsInTx = opsInTx;
-    this.outputResultFile = outputResultFile;
+    this.settings = settings;
   }
 
   public static void main(String[] args) {
@@ -76,7 +76,7 @@ public class OStressTester {
   }
 
   @SuppressWarnings("unchecked")
-  private int execute() throws Exception {
+  public int execute() throws Exception {
 
     int returnCode = 0;
 
@@ -93,23 +93,31 @@ public class OStressTester {
 
         consoleProgressWriter.start();
 
-        consoleProgressWriter
-            .printMessage(String.format("Starting workload %s - concurrencyLevel=%d...", workload.getName(), threadsNumber));
+        consoleProgressWriter.printMessage(
+            String.format("\nStarting workload %s (concurrencyLevel=%d)...", workload.getName(), settings.concurrencyLevel));
 
         final long startTime = System.currentTimeMillis();
 
-        workload.execute(threadsNumber, databaseIdentifier);
+        workload.execute(settings, databaseIdentifier);
 
         final long endTime = System.currentTimeMillis();
 
         consoleProgressWriter.sendShutdown();
 
-        System.out.println(String.format("\nTotal execution time: %.3f secs", ((float) (endTime - startTime) / 1000f)));
+        System.out.println(String.format("\n- Total execution time: %.3f secs", ((float) (endTime - startTime) / 1000f)));
 
         System.out.println(workload.getFinalResult());
+
+        dumpHaMetrics();
+
+        if (settings.checkDatabase && workload instanceof OCheckWorkload) {
+          System.out.println(String.format("- Checking database..."));
+          ((OCheckWorkload) workload).check(databaseIdentifier);
+          System.out.println(String.format("- Check completed"));
+        }
       }
 
-      if (outputResultFile != null)
+      if (settings.resultOutputFile != null)
         writeFile();
 
     } catch (Exception ex) {
@@ -117,13 +125,33 @@ public class OStressTester {
       returnCode = 1;
     } finally {
       // we don't need to drop the in-memory DB
-      if (databaseIdentifier.getMode() != OMode.MEMORY) {
+      if (settings.keepDatabaseAfterTest || databaseIdentifier.getMode() == OMode.MEMORY)
+        consoleProgressWriter.printMessage(String.format("\nDatabase is available on [%s].", databaseIdentifier.getUrl()));
+      else {
         ODatabaseUtils.dropDatabase(databaseIdentifier);
         consoleProgressWriter.printMessage(String.format("\nDropped database [%s].", databaseIdentifier.getUrl()));
       }
+
     }
 
     return returnCode;
+  }
+
+  private void dumpHaMetrics() {
+    if (settings.haMetrics) {
+      final ODatabase db = ODatabaseUtils.openDatabase(databaseIdentifier, OStorageRemote.CONNECTION_STRATEGY.STICKY);
+      try {
+        final String output = db.command(new OCommandSQL("ha status -latency -messages -output=text")).execute();
+        System.out.println("HA METRICS");
+        System.out.println(output);
+
+      } catch (Exception e) {
+        // IGNORE IT
+      } finally {
+        db.close();
+      }
+    }
+
   }
 
   private void writeFile() {
@@ -134,18 +162,18 @@ public class OStressTester {
       for (OWorkload workload : workloads) {
         if (i++ > 0)
           output.append(",");
-        workload.getFinalResultAsJson();
+        output.append(workload.getFinalResultAsJson());
       }
       output.append("]}");
 
-      OIOUtils.writeFile(new File(outputResultFile), output.toString());
+      OIOUtils.writeFile(new File(settings.resultOutputFile), output.toString());
     } catch (IOException e) {
       System.err.println("\nError on writing the result file : " + e.getMessage());
     }
   }
 
   public int getThreadsNumber() {
-    return threadsNumber;
+    return settings.concurrencyLevel;
   }
 
   public OMode getMode() {
@@ -161,7 +189,7 @@ public class OStressTester {
   }
 
   public int getTransactionsNumber() {
-    return opsInTx;
+    return settings.operationsPerTransaction;
   }
 
   public static OWorkloadFactory getWorkloadFactory() {

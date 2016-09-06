@@ -159,7 +159,7 @@ public class OSchemaShared extends ODocumentWrapperNoClass
 
     for (int i = 0; i < nameSize; ++i) {
       final char c = iName.charAt(i);
-      if (c == ':' || c == ',' || c == ';' || c == ' ' || c == '%' || c == '=')
+      if (c == ':' || c == ',' || c == ';' || c == ' ' || c == '=')
         // INVALID CHARACTER
         return c;
     }
@@ -522,7 +522,10 @@ public class OSchemaShared extends ODocumentWrapperNoClass
       } else if (storage instanceof OStorageProxy) {
         final OCommandSQL commandSQL = new OCommandSQL(cmd.toString());
         db.command(commandSQL).execute();
+        final OClass classToDrop = getClass(className);
         reload();
+        if (getClass(className) == null) // really dropped, for example there may be no rights to drop a class
+          dropClassIndexes(classToDrop);
       } else
         dropClassInternal(className);
 

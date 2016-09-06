@@ -114,7 +114,6 @@ public class OLuceneIndexEngineDelegate implements OLuceneIndexEngine, OFreezabl
 
   @Override
   public void close() {
-
     delegate.close();
   }
 
@@ -189,6 +188,11 @@ public class OLuceneIndexEngineDelegate implements OLuceneIndexEngine, OFreezabl
   @Override
   public String getName() {
     return delegate.getName();
+  }
+
+  @Override
+  public String getIndexNameByKey(final Object key) {
+    return delegate.getIndexNameByKey(key);
   }
 
   @Override
@@ -271,7 +275,11 @@ public class OLuceneIndexEngineDelegate implements OLuceneIndexEngine, OFreezabl
 
   @Override
   public void release() {
-
     delegate.release();
+  }
+
+  @Override
+  public boolean acquireAtomicExclusiveLock(Object key) {
+    return delegate.acquireAtomicExclusiveLock(key);
   }
 }

@@ -1,7 +1,7 @@
 #!/bin/sh
 # OrientDB Backup script
 #
-# Copyright (c) Orient Technologies LTD (http://www.orientechnologies.com)
+# Copyright (c) OrientDB LTD (http://www.orientdb.com)
 
 DB=$1
 USER=$2
@@ -54,6 +54,10 @@ export ORIENTDB_HOME
 if [ "$#" != "5" ] || [ "$5" = "default" ]
 then
 	sh ./console.sh "connect $DB $USER $PASSWD;freeze database;backup database $DEST_BACKUP;release database;" 1> $ECHO_PATH
+  	if [ "$?" -ne "0" ]; then
+	    sh ./console.sh "connect $DB $USER $PASSWD;release database;" 1> $ECHO_PATH
+	    exit $?
+	fi
 	exit 0 
 fi
 if [ "$5" != "lvm"  ]

@@ -23,10 +23,10 @@ import com.orientechnologies.orient.core.record.ORecord;
 
 /**
  * Hook interface to catch all events regarding records.
- * 
+ *
  * @author Luca Garulli
  * @see ORecordHookAbstract
- * 
+ *
  */
 public interface ORecordHook {
   enum DISTRIBUTED_EXECUTION_MODE {
@@ -42,7 +42,7 @@ public interface ORecordHook {
 
     CREATE_FAILED, READ_FAILED, UPDATE_FAILED, DELETE_FAILED, CREATE_REPLICATED, READ_REPLICATED, UPDATE_REPLICATED,
 
-    DELETE_REPLICATED, FINALIZE_UPDATE, FINALIZE_CREATION
+    DELETE_REPLICATED, FINALIZE_UPDATE, FINALIZE_CREATION, FINALIZE_DELETION
   }
 
   enum RESULT {

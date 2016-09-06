@@ -269,7 +269,7 @@ public class SBTreeWALTest extends SBTreeTest {
   }
 
   private void restoreDataFromWAL() throws IOException {
-    ODiskWriteAheadLog log = new ODiskWriteAheadLog(4, -1, 10 * 1024L * OWALPage.PAGE_SIZE, null, actualStorage);
+    ODiskWriteAheadLog log = new ODiskWriteAheadLog(4, -1, 10 * 1024L * OWALPage.PAGE_SIZE, null, true, actualStorage, 10);
     OLogSequenceNumber lsn = log.begin();
 
     List<OWALRecord> atomicUnit = new ArrayList<OWALRecord>();
@@ -295,18 +295,14 @@ public class SBTreeWALTest extends SBTreeTest {
             final OFileCreatedWALRecord fileCreatedCreatedRecord = (OFileCreatedWALRecord) restoreRecord;
             final String fileName = fileCreatedCreatedRecord.getFileName().replace("actualSBTree", "expectedSBTree");
 
-            if (expectedWriteCache.exists(fileName))
-              expectedReadCache.openFile(fileName, fileCreatedCreatedRecord.getFileId(), expectedWriteCache);
-            else
+            if (!expectedWriteCache.exists(fileName))
               expectedReadCache.addFile(fileName, fileCreatedCreatedRecord.getFileId(), expectedWriteCache);
+
           } else {
             final OUpdatePageRecord updatePageRecord = (OUpdatePageRecord) restoreRecord;
 
             final long fileId = updatePageRecord.getFileId();
             final long pageIndex = updatePageRecord.getPageIndex();
-
-            if (!expectedWriteCache.isOpen(fileId))
-              expectedReadCache.openFile(fileId, expectedWriteCache);
 
             OCacheEntry cacheEntry = expectedReadCache.load(fileId, pageIndex, true, expectedWriteCache, 1);
             if (cacheEntry == null) {

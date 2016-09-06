@@ -1,69 +1,41 @@
 package com.orientechnologies.orient.server.distributed;
 
 import com.orientechnologies.common.concur.ONeedRetryException;
+import com.orientechnologies.orient.client.remote.OServerAdmin;
 import com.orientechnologies.orient.core.exception.OConcurrentModificationException;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.sql.OCommandSQL;
 import com.tinkerpop.blueprints.Vertex;
 import com.tinkerpop.blueprints.impls.orient.*;
-import org.junit.Test;
 
-import java.util.ArrayList;
-import java.util.ConcurrentModificationException;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-/**
- * Test case to check the right management of distributed exception while a server is starting. Derived from the test provided by
- * Gino John for issue http://www.prjhub.com/#/issues/6449.
- *
- * 3 nodes, the test is started after the 1st node is up & running. The test is composed by multiple (8) parallel threads that
- * update the same records 20,000 times.
- * 
- * @author Luca Garulli
- */
-public class StandAloneDatabaseJavaThreadPoolTest extends AbstractServerClusterTxTest {
+public final class StandAloneDatabaseJavaThreadPoolTest {
 
-  final static int           SERVERS           = 3;
-  private static final int   CONCURRENCY_LEVEL = 8;
-  private static final int   TOTAL_CYCLES      = 20000;
-
+  private String             dbName;
   private OrientGraphFactory graphReadFactory;
   private ExecutorService    executorService;
-  private int                serverStarted     = 0;
-  List<Future<?>>            ths               = new ArrayList<Future<?>>();
 
-  @Test
-  public void test() throws Exception {
-    useTransactions = false;
-    init(SERVERS);
-    prepare(false);
-    execute();
+  public StandAloneDatabaseJavaThreadPoolTest(String dbName) {
+    this.dbName = dbName;
+    checkAndCreateDatabase(dbName);
   }
 
-  @Override
-  protected void onServerStarted(ServerRun server) {
-    if (serverStarted++ == 0) {
-      // START THE TEST DURING 2ND NODE STARTUP
-      createSchemaAndFirstVertices();
-      startTest();
+  /**
+   * @return
+   */
+  private ExecutorService getExecutorService() {
+    if (executorService == null) {
+      executorService = Executors.newFixedThreadPool(10);
     }
+    return executorService;
   }
 
-  protected String getDatabaseURL(final ServerRun server) {
-    return "remote:" + server.getDatabasePath(getDatabaseName());
-  }
-
-  @Override
-  public String getDatabaseName() {
-    return "dbquerytest";
-  }
-
-  private void createSchemaAndFirstVertices() {
-    OrientBaseGraph orientGraph = new OrientGraphNoTx(getDatabaseURL(serverInstance.get(0)));
+  public void runTest() {
+    OrientBaseGraph orientGraph = new OrientGraphNoTx(getDBURL());
     createVertexType(orientGraph, "Test");
     createVertexType(orientGraph, "Test1");
     orientGraph.shutdown();
@@ -94,21 +66,13 @@ public class StandAloneDatabaseJavaThreadPoolTest extends AbstractServerClusterT
       }
     }
     graph.shutdown();
-  }
-
-  @Override
-  public void executeTest() throws Exception {
-    waitForEndOfTest();
-  }
-
-  private void startTest() {
-    for (int i = 0; i < CONCURRENCY_LEVEL; i++) {
+    // startPoolInfoThread();
+    List<Future<?>> ths = new ArrayList<Future<?>>();
+    for (int i = 0; i < 10; i++) {
       Future<?> future = getExecutorService().submit(startThread(i, getGraphFactory()));
       ths.add(future);
     }
-  }
 
-  private void waitForEndOfTest() {
     for (Future<?> th : ths) {
       try {
         th.get();
@@ -135,7 +99,7 @@ public class StandAloneDatabaseJavaThreadPoolTest extends AbstractServerClusterT
         try {
           String query = "select from Test where prop2='v2-1'";
           boolean isRunning = true;
-          for (int i = 1; i < TOTAL_CYCLES && isRunning; i++) {
+          for (int i = 1; i < 10000000 && isRunning; i++) {
             if ((i % 2500) == 0) {
               long et = System.currentTimeMillis();
               log(sb.toString() + " [" + id + "] Total Records Processed: [" + i + "] Current: [2500] Time taken: ["
@@ -165,6 +129,7 @@ public class StandAloneDatabaseJavaThreadPoolTest extends AbstractServerClusterT
                       log("*$$$$$$$$$$$$$$ [" + id + "][" + k + "] Distributed Exception: [" + ex + "] Cause: ["
                           + (ex.getCause() != null ? ex.getCause() : "--") + "] ");
                     }
+
                   } catch (ODistributedException ex) {
                     if (ex.getCause() instanceof OConcurrentModificationException) {
                     } else {
@@ -176,10 +141,20 @@ public class StandAloneDatabaseJavaThreadPoolTest extends AbstractServerClusterT
                   } catch (Exception ex) {
                     log("[" + id + "][" + k + "] Exception " + ex);
                   }
+
                 }
               } else {
-                Iterable<Vertex> vtxs = graph.command(new OCommandSQL(query)).execute();
                 boolean retry = true;
+
+                Iterable<Vertex> vtxs = null;
+                for (int k = 0; k < 100 && retry; k++)
+                  try {
+                    vtxs = graph.command(new OCommandSQL(query)).execute();
+                    break;
+                  } catch (ONeedRetryException e) {
+                    // RETRY
+                  }
+
                 for (Vertex vtx : vtxs) {
                   if (retry) {
                     retry = true;
@@ -232,7 +207,7 @@ public class StandAloneDatabaseJavaThreadPoolTest extends AbstractServerClusterT
                       }
                     }
                     if (retry) {
-                      log("********** [" + id + "] Failed to update after Exception for vertex " + vtx);
+                      log("*******#################******* [" + id + "] Failed to update after Exception for vertex " + vtx);
                     }
                   }
                 }
@@ -252,13 +227,66 @@ public class StandAloneDatabaseJavaThreadPoolTest extends AbstractServerClusterT
     return th;
   }
 
+  private void startPoolInfoThread() {
+    Thread th = new Thread() {
+      @Override
+      public void run() {
+        for (int i = 0; i < 10000; i++) {
+          log("[" + i + "] Available insances pool " + getGraphFactory().getAvailableInstancesInPool() + " Created instances: "
+              + getGraphFactory().getCreatedInstancesInPool());
+          try {
+            Thread.sleep(20000);
+          } catch (InterruptedException e) {
+            e.printStackTrace();
+          }
+
+        }
+      }
+    };
+    th.start();
+  }
+
+  public void printVertex(String info, OrientVertex vtx) {
+    System.out.println("--------" + info + " ----------");
+    System.out.println(vtx);
+    Set<String> keys = vtx.getPropertyKeys();
+    for (String key : keys) {
+      System.out.println("Key = " + key + " Value = " + vtx.getProperty(key));
+    }
+  }
+
+  /**
+   * @return
+   */
+  public String getDBURL() {
+    return "remote:" + "localhost:2424;localhost:2425;localhost:2426" + "/" + dbName;
+  }
+
   private OrientGraphFactory getGraphFactory() {
     if (graphReadFactory == null) {
-      log("Datastore pool created with size : 10, db location: " + getDatabaseURL(serverInstance.get(0)));
-      graphReadFactory = new OrientGraphFactory(getDatabaseURL(serverInstance.get(0)));
+      log("Datastore pool created with size : 10, db location: " + getDBURL());
+      graphReadFactory = new OrientGraphFactory(getDBURL());
       graphReadFactory.setupPool(10, 10);
     }
     return graphReadFactory;
+  }
+
+  /**
+   *
+   */
+  public void checkAndCreateDatabase(String dbName) {
+    try {
+      OServerAdmin serverAdmin = new OServerAdmin(getDBURL()).connect("root", "root");
+      if (!serverAdmin.existsDatabase("plocal")) {
+        log("Database does not exists. New database is created");
+        serverAdmin.createDatabase(dbName, "graph", "plocal");
+      } else {
+        log(dbName + " database already exists");
+      }
+      serverAdmin.close();
+    } catch (Exception ex) {
+      log("Failed to create database", ex);
+    }
   }
 
   private void createVertexType(OrientBaseGraph orientGraph, String className) {
@@ -269,10 +297,24 @@ public class StandAloneDatabaseJavaThreadPoolTest extends AbstractServerClusterT
     }
   }
 
-  private ExecutorService getExecutorService() {
-    if (executorService == null) {
-      executorService = Executors.newFixedThreadPool(10);
-    }
-    return executorService;
+  private void log(String message) {
+    System.out.println(message);
   }
+
+  private void log(String message, Throwable th) {
+    System.out.println(th.getMessage());
+    th.printStackTrace();
+  }
+
+  public static void main(String args[]) {
+    StandAloneDatabaseJavaThreadPoolTest test = new StandAloneDatabaseJavaThreadPoolTest("dbquerytest1");
+    test.runTest();
+    try {
+      Thread.sleep(30000);
+    } catch (InterruptedException e) {
+      e.printStackTrace();
+    }
+    Runtime.getRuntime().halt(0);
+  }
+
 }

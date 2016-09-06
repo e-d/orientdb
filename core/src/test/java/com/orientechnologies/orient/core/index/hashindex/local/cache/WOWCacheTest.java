@@ -6,12 +6,14 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.zip.CRC32;
 
+import com.orientechnologies.common.collection.closabledictionary.OClosableLinkedContainer;
 import com.orientechnologies.common.directmemory.OByteBufferPool;
 import com.orientechnologies.common.types.OModifiableBoolean;
 import com.orientechnologies.orient.core.storage.cache.OCachePointer;
 import com.orientechnologies.orient.core.storage.cache.local.OWOWCache;
 import com.orientechnologies.orient.core.storage.cache.OWriteCache;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.ODiskWriteAheadLog;
+import org.apache.commons.lang.SystemUtils;
 import org.testng.Assert;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
@@ -42,7 +44,8 @@ public class WOWCacheTest {
 
   private ODiskWriteAheadLog writeAheadLog;
 
-  private OWriteCache wowCache;
+  private OWOWCache wowCache;
+  private OClosableLinkedContainer<Long, OFileClassic> files = new OClosableLinkedContainer<Long, OFileClassic>(1024);
 
   @BeforeClass
   public void beforeClass() throws IOException {
@@ -100,7 +103,8 @@ public class WOWCacheTest {
 
   private void initBuffer() throws IOException {
     wowCache = new OWOWCache(true, pageSize, new OByteBufferPool(pageSize), 10000, writeAheadLog, 10, 100, 100, storageLocal, false,
-        1);
+        files, 1);
+    wowCache.loadRegisteredFiles();
   }
 
   public void testLoadStore() throws IOException {
@@ -124,7 +128,7 @@ public class WOWCacheTest {
       cachePointer.releaseExclusiveLock();
 
       wowCache.store(fileId, i, cachePointer);
-      cachePointer.decrementReferrer();
+      cachePointer.decrementReadersReferrer();
     }
 
     for (int i = 0; i < pageData.length; i++) {
@@ -135,7 +139,7 @@ public class WOWCacheTest {
       ByteBuffer buffer = cachePointer.getSharedBuffer();
       buffer.position(systemOffset);
       buffer.get(dataTwo);
-      cachePointer.decrementReferrer();
+      cachePointer.decrementReadersReferrer();
 
       Assert.assertEquals(dataTwo, dataOne);
     }
@@ -170,7 +174,7 @@ public class WOWCacheTest {
       cachePointer.releaseExclusiveLock();
 
       wowCache.store(fileId, pageIndex, cachePointer);
-      cachePointer.decrementReferrer();
+      cachePointer.decrementReadersReferrer();
     }
 
     for (Map.Entry<Long, byte[]> entry : pageIndexDataMap.entrySet()) {
@@ -183,7 +187,7 @@ public class WOWCacheTest {
       buffer.position(systemOffset);
       buffer.get(dataTwo);
 
-      cachePointer.decrementReferrer();
+      cachePointer.decrementReadersReferrer();
       Assert.assertEquals(dataTwo, dataOne);
     }
 
@@ -207,7 +211,7 @@ public class WOWCacheTest {
       cachePointer.releaseExclusiveLock();
 
       wowCache.store(fileId, pageIndex, cachePointer);
-      cachePointer.decrementReferrer();
+      cachePointer.decrementReadersReferrer();
     }
 
     for (Map.Entry<Long, byte[]> entry : pageIndexDataMap.entrySet()) {
@@ -218,7 +222,7 @@ public class WOWCacheTest {
       ByteBuffer buffer = cachePointer.getSharedBuffer();
       buffer.position(systemOffset);
       buffer.get(dataTwo);
-      cachePointer.decrementReferrer();
+      cachePointer.decrementReadersReferrer();
 
       Assert.assertEquals(dataTwo, dataOne);
     }
@@ -251,7 +255,7 @@ public class WOWCacheTest {
       cachePointer.releaseExclusiveLock();
 
       wowCache.store(fileId, i, cachePointer);
-      cachePointer.decrementReferrer();
+      cachePointer.decrementReadersReferrer();
     }
 
     for (int i = 0; i < pageData.length; i++) {
@@ -262,12 +266,20 @@ public class WOWCacheTest {
       ByteBuffer buffer = cachePointer.getSharedBuffer();
       buffer.position(systemOffset);
       buffer.get(dataTwo);
-      cachePointer.decrementReferrer();
+      cachePointer.decrementReadersReferrer();
 
       Assert.assertEquals(dataTwo, dataOne);
     }
 
-    Thread.sleep(30000);
+    final long start = System.currentTimeMillis();
+    while (wowCache.getWriteCacheSize() != 0) {
+      Thread.sleep(1000);
+
+      //wait no more than 10 min
+      if (((System.currentTimeMillis() - start) / 1000) > 10 * 60) {
+        Assert.assertEquals(wowCache.getWriteCacheSize(), 0);
+      }
+    }
 
     for (int i = 0; i < pageData.length; i++) {
       byte[] dataContent = pageData[i];

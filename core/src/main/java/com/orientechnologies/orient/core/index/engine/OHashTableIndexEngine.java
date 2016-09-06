@@ -25,16 +25,8 @@ import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
-import com.orientechnologies.orient.core.index.OIndexAbstractCursor;
-import com.orientechnologies.orient.core.index.OIndexCursor;
-import com.orientechnologies.orient.core.index.OIndexDefinition;
-import com.orientechnologies.orient.core.index.OIndexEngine;
-import com.orientechnologies.orient.core.index.OIndexKeyCursor;
-import com.orientechnologies.orient.core.index.hashindex.local.OHashIndexBucket;
-import com.orientechnologies.orient.core.index.hashindex.local.OHashTable;
-import com.orientechnologies.orient.core.index.hashindex.local.OLocalHashTable;
-import com.orientechnologies.orient.core.index.hashindex.local.OLocalHashTable20;
-import com.orientechnologies.orient.core.index.hashindex.local.OMurmurHash3HashFunction;
+import com.orientechnologies.orient.core.index.*;
+import com.orientechnologies.orient.core.index.hashindex.local.*;
 import com.orientechnologies.orient.core.iterator.OEmptyIterator;
 import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.record.impl.ODocument;
@@ -95,7 +87,8 @@ public final class OHashTableIndexEngine implements OIndexEngine {
 
   @Override
   public void create(OBinarySerializer valueSerializer, boolean isAutomatic, OType[] keyTypes, boolean nullPointerSupport,
-      OBinarySerializer keySerializer, int keySize, Set<String> clustersToIndex, Map<String, String> engineProperties, ODocument metadata) {
+      OBinarySerializer keySerializer, int keySize, Set<String> clustersToIndex, Map<String, String> engineProperties,
+      ODocument metadata) {
     hashFunction.setValueSerializer(keySerializer);
 
     hashTable.create(keySerializer, valueSerializer, keyTypes, nullPointerSupport);
@@ -103,12 +96,16 @@ public final class OHashTableIndexEngine implements OIndexEngine {
 
   @Override
   public void flush() {
-    hashTable.flush();
   }
 
   @Override
   public void deleteWithoutLoad(String indexName) {
     hashTable.deleteWithoutLoad(indexName, (OAbstractPaginatedStorage) getDatabase().getStorage().getUnderlying());
+  }
+
+  @Override
+  public String getIndexNameByKey(final Object key) {
+    return name;
   }
 
   @Override
@@ -410,6 +407,12 @@ public final class OHashTableIndexEngine implements OIndexEngine {
         return bucketEntry.key;
       }
     };
+  }
+
+  @Override
+  public boolean acquireAtomicExclusiveLock(Object key) {
+    hashTable.acquireAtomicExclusiveLock();
+    return true;
   }
 
   private ODatabaseDocumentInternal getDatabase() {

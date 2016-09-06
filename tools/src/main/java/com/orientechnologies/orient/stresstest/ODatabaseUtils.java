@@ -20,6 +20,7 @@
 package com.orientechnologies.orient.stresstest;
 
 import com.orientechnologies.orient.client.remote.OServerAdmin;
+import com.orientechnologies.orient.client.remote.OStorageRemote;
 import com.orientechnologies.orient.core.db.ODatabase;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 
@@ -30,29 +31,43 @@ import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
  */
 public class ODatabaseUtils {
 
-  public static void createDatabase(ODatabaseIdentifier databaseIdentifier) throws Exception {
+  public static void createDatabase(final ODatabaseIdentifier databaseIdentifier) throws Exception {
+    ODatabaseDocumentTx db;
+
     switch (databaseIdentifier.getMode()) {
     case PLOCAL:
     case MEMORY:
-      new ODatabaseDocumentTx(databaseIdentifier.getUrl()).create();
+      db = new ODatabaseDocumentTx(databaseIdentifier.getUrl());
+      if (!db.exists())
+        db.create();
       break;
+
     case REMOTE:
-      new OServerAdmin(databaseIdentifier.getUrl()).connect("root", databaseIdentifier.getPassword())
-          .createDatabase(databaseIdentifier.getName(), "document", "plocal");
+      final OServerAdmin adm = new OServerAdmin(databaseIdentifier.getUrl()).connect("root", databaseIdentifier.getPassword());
+
+      if (!adm.existsDatabase())
+        adm.createDatabase(databaseIdentifier.getName(), "document", "plocal");
       break;
     }
   }
 
-  public static ODatabase openDatabase(ODatabaseIdentifier databaseIdentifier) {
+  public static ODatabase openDatabase(final ODatabaseIdentifier databaseIdentifier,
+      final OStorageRemote.CONNECTION_STRATEGY connectionStrategy) {
+    ODatabaseDocumentTx database = null;
+
     switch (databaseIdentifier.getMode()) {
     case PLOCAL:
     case MEMORY:
-      return new ODatabaseDocumentTx(databaseIdentifier.getUrl()).open("admin", "admin");
+      database = new ODatabaseDocumentTx(databaseIdentifier.getUrl()).open("admin", "admin");
+      break;
     case REMOTE:
-      return new ODatabaseDocumentTx(databaseIdentifier.getUrl()).open("root", databaseIdentifier.getPassword());
+      database = new ODatabaseDocumentTx(databaseIdentifier.getUrl());
+      database.setProperty(OStorageRemote.PARAM_CONNECTION_STRATEGY, connectionStrategy.toString());
+      database.open("root", databaseIdentifier.getPassword());
+      break;
     }
 
-    return null;
+    return database;
   }
 
   public static void dropDatabase(ODatabaseIdentifier databaseIdentifier) throws Exception {
@@ -60,7 +75,7 @@ public class ODatabaseUtils {
     switch (databaseIdentifier.getMode()) {
     case PLOCAL:
     case MEMORY:
-      openDatabase(databaseIdentifier).drop();
+      openDatabase(databaseIdentifier, OStorageRemote.CONNECTION_STRATEGY.STICKY).drop();
       break;
     case REMOTE:
       new OServerAdmin(databaseIdentifier.getUrl()).connect("root", databaseIdentifier.getPassword())

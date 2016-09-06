@@ -8,16 +8,20 @@ import com.orientechnologies.orient.etl.OExtractedItem;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
-import sun.misc.FloatConsts;
 
 import java.io.IOException;
 import java.io.Reader;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 
-import static com.orientechnologies.orient.etl.OETLProcessor.LOG_LEVELS.DEBUG;
+import static com.orientechnologies.orient.etl.OETLProcessor.LOG_LEVELS.*;
 
 /**
  * An extractor based on Apache Commons CSV
@@ -36,6 +40,7 @@ public class OCSVExtractor extends OAbstractSourceExtractor {
   private CSVFormat           csvFormat;
   private String nullValue  = NULL_STRING;
   private String dateFormat = "yyyy-MM-dd";
+  private String dateTimeFormat = "yyyy-MM-dd hh:mm";
 
   @Override
   public ODocument getConfiguration() {
@@ -45,6 +50,7 @@ public class OCSVExtractor extends OAbstractSourceExtractor {
             + "{columns:{optional:true,description:'Columns array containing names, and optionally type after : (e.g.: name:String, age:int'}},"
             + "{nullValue:{optional:true,description:'Value to consider as NULL_STRING. Default is NULL'}},"
             + "{dateFormat:{optional:true,description:'Date format used to parde dates. Default is yyyy-MM-dd'}},"
+            + "{dateTimeFormat:{optional:true,description:'DateTime format used to parde dates. Default is yyyy-mm-dd HH:MM'}},"
             + "{quote:{optional:true,description:'String character delimiter. Use \"\" to do not use any delimitator'}},"
             + "{ignoreEmptyLines:{optional:true,description:'Ignore empty lines',type:'boolean'}},"
             + "{skipFrom:{optional:true,description:'Line number where start to skip',type:'int'}},"
@@ -80,6 +86,9 @@ public class OCSVExtractor extends OAbstractSourceExtractor {
     if (iConfiguration.containsField("dateFormat")) {
       dateFormat = iConfiguration.<String>field("dateFormat");
     }
+    if (iConfiguration.containsField("dateTimeFormat")) {
+      dateFormat = iConfiguration.<String>field("dateTimeFormat");
+    }
 
     if (iConfiguration.containsField("ignoreEmptyLines")) {
       boolean ignoreEmptyLines = iConfiguration.field("ignoreEmptyLines");
@@ -111,7 +120,7 @@ public class OCSVExtractor extends OAbstractSourceExtractor {
       }
 
       log(OETLProcessor.LOG_LEVELS.INFO, "column types: %s", columnTypes);
-      csvFormat = csvFormat.withHeader(columnNames.toArray(new String[] {}));
+      csvFormat = csvFormat.withHeader(columnNames.toArray(new String[] {})).withSkipHeaderRecord(true);
 
     }
 
@@ -191,11 +200,18 @@ public class OCSVExtractor extends OAbstractSourceExtractor {
         final OType fieldType = typeEntry.getValue();
         String fieldValueAsString = recordAsMap.get(fieldName);
         try {
+          if (fieldType.getDefaultJavaType().equals(Date.class)) {
+            if (fieldType.equals(OType.DATE))
+              doc.field(fieldName, transformToDate(fieldValueAsString));
+            else
+              doc.field(fieldName, transformToDateTime(fieldValueAsString));
+          } else {
           Object fieldValue = OType.convert(fieldValueAsString, fieldType.getDefaultJavaType());
           doc.field(fieldName, fieldValue);
+          }
         } catch (Exception e) {
           processor.getStats().incrementErrors();
-          log(OETLProcessor.LOG_LEVELS.ERROR, "Error on converting row %d field '%s' (%d), value '%s' (class:%s) to type: %s",
+          log(OETLProcessor.LOG_LEVELS.ERROR, "Error on converting row %d field '%s' , value '%s' (class:%s) to type: %s",
               csvRecord.getRecordNumber(), fieldName, fieldValueAsString, fieldValueAsString.getClass().getName(), fieldType);
         }
       }
@@ -210,7 +226,8 @@ public class OCSVExtractor extends OAbstractSourceExtractor {
     Object fieldValue;
     if ((fieldValue = transformToDate(fieldStringValue)) == null)// try maybe Date type
       if ((fieldValue = transformToNumeric(fieldStringValue)) == null)// try maybe Numeric type
-        fieldValue = fieldStringValue; // type String
+        if ((fieldValue = transformToBoolean(fieldStringValue)) == null)// try maybe Boolean type
+          fieldValue = fieldStringValue; // type String
     return fieldValue;
   }
 
@@ -227,14 +244,27 @@ public class OCSVExtractor extends OAbstractSourceExtractor {
     return fieldValue;
   }
 
+  private Object transformToDateTime(String fieldStringValue) {
+    // DATE
+    DateFormat df = new SimpleDateFormat(dateTimeFormat);
+    df.setLenient(true);
+    Object fieldValue;
+    try {
+      fieldValue = df.parse(fieldStringValue);
+    } catch (ParseException pe) {
+      fieldValue = null;
+    }
+    return fieldValue;
+  }
+
   private Object transformToNumeric(final String fieldStringValue) {
     if (fieldStringValue.isEmpty())
-      return fieldStringValue;
+      return null;
 
     final char c = fieldStringValue.charAt(0);
     if (c != '-' && !Character.isDigit(c))
       // NOT A NUMBER FOR SURE
-      return fieldStringValue;
+      return null;
 
     Object fieldValue;
     try {
@@ -252,9 +282,15 @@ public class OCSVExtractor extends OAbstractSourceExtractor {
         }
       }
     } catch (NumberFormatException nf) {
-      fieldValue = fieldStringValue;
+      fieldValue = null;
     }
     return fieldValue;
+  }
+
+  private Object transformToBoolean(final String fieldStringValue) {
+    if (fieldStringValue.equalsIgnoreCase(Boolean.FALSE.toString()) || fieldStringValue.equalsIgnoreCase(Boolean.TRUE.toString()))
+      return Boolean.parseBoolean(fieldStringValue);
+    return null;
   }
 
   /**
@@ -262,7 +298,7 @@ public class OCSVExtractor extends OAbstractSourceExtractor {
    * choosing Java 1.8 as minimal supported
    **/
   protected boolean isFinite(Float f) {
-    return Math.abs(f) <= FloatConsts.MAX_VALUE;
+    return Math.abs(f) <= Float.MAX_VALUE;
   }
 
   @Override

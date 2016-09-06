@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (c) Orient Technologies LTD (http://www.orientechnologies.com)
+# Copyright (c) OrientDB LTD (http://orientdb.com/)
 #
 
 echo "           .                                          "
@@ -72,7 +72,6 @@ export JAVA
 
 LOG_FILE=$ORIENTDB_HOME/config/orientdb-server-log.properties
 WWW_PATH=$ORIENTDB_HOME/www
-JAVA_OPTS_SCRIPT="-Djna.nosys=true -XX:+HeapDumpOnOutOfMemoryError -XX:MaxDirectMemorySize=512g -Djava.awt.headless=true -Dfile.encoding=UTF8 -Drhino.opt.level=9"
 ORIENTDB_PID=$ORIENTDB_HOME/bin/orient.pid
 
 if [ -f "$ORIENTDB_PID" ]; then
@@ -95,6 +94,10 @@ done
 
 if [ -z "$ORIENTDB_OPTS_MEMORY" ] ; then
     ORIENTDB_OPTS_MEMORY="-Xms512m -Xmx512m"
+fi
+
+if [ -z "$JAVA_OPTS_SCRIPT" ] ; then
+    JAVA_OPTS_SCRIPT="-Djna.nosys=true -XX:+HeapDumpOnOutOfMemoryError -XX:MaxDirectMemorySize=512g -Djava.awt.headless=true -Dfile.encoding=UTF8 -Drhino.opt.level=9"
 fi
 
 # ORIENTDB SETTINGS LIKE DISKCACHE, ETC

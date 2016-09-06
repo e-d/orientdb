@@ -20,17 +20,22 @@
 package com.orientechnologies.orient.graph.stresstest;
 
 import com.orientechnologies.common.util.OCallable;
+import com.orientechnologies.orient.client.remote.OStorageRemote;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.sql.OCommandSQL;
 import com.orientechnologies.orient.stresstest.ODatabaseIdentifier;
+import com.orientechnologies.orient.stresstest.OStressTesterSettings;
 import com.tinkerpop.blueprints.impls.orient.OrientBaseGraph;
 import com.tinkerpop.blueprints.impls.orient.OrientGraphNoTx;
+import com.tinkerpop.blueprints.impls.orient.OrientVertex;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * CRUD implementation of the workload.
@@ -39,23 +44,29 @@ import java.util.List;
  */
 public class OGraphShortestPathWorkload extends OBaseGraphWorkload {
 
-  static final String     INVALID_FORM_MESSAGE = "SHORTESTPATH workload must be in form of L<limit>.";
+  static final String      INVALID_FORM_MESSAGE = "SHORTESTPATH workload must be in form of L<limit>.";
 
-  private int             limit                = -1;
-  private OWorkLoadResult result               = new OWorkLoadResult();
-  final List<ORID>        startingVertices     = new ArrayList<ORID>(limit > -1 ? limit : 1000);
+  private int              limit                = -1;
+  private OWorkLoadResult  result               = new OWorkLoadResult();
+  private final AtomicLong totalDepth           = new AtomicLong();
+  private final AtomicLong maxDepth             = new AtomicLong();
+  private final AtomicLong notConnected         = new AtomicLong();
+  private final List<ORID> startingVertices     = new ArrayList<ORID>(limit > -1 ? limit : 1000);
 
   public OGraphShortestPathWorkload() {
-    super(false);
+    connectionStrategy = OStorageRemote.CONNECTION_STRATEGY.ROUND_ROBIN_REQUEST;
   }
 
   @Override
   public String getName() {
-    return "SHORTESTPATH";
+    return "GSP";
   }
 
   @Override
   public void parseParameters(final String args) {
+    if (args == null)
+      return;
+
     final String ops = args.toUpperCase();
     char state = 'L';
     final StringBuilder number = new StringBuilder();
@@ -77,7 +88,9 @@ public class OGraphShortestPathWorkload extends OBaseGraphWorkload {
   }
 
   @Override
-  public void execute(final int concurrencyLevel, final ODatabaseIdentifier databaseIdentifier) {
+  public void execute(final OStressTesterSettings settings, final ODatabaseIdentifier databaseIdentifier) {
+    connectionStrategy = settings.loadBalancing;
+
     // RETRIEVE THE STARTING VERTICES
     final OrientGraphNoTx g = getGraphNoTx(databaseIdentifier);
     try {
@@ -91,15 +104,30 @@ public class OGraphShortestPathWorkload extends OBaseGraphWorkload {
     }
     result.total = startingVertices.size();
 
-    executeOperation(databaseIdentifier, result, concurrencyLevel, new OCallable<Void, OBaseWorkLoadContext>() {
+    executeOperation(databaseIdentifier, result, settings.concurrencyLevel, settings.operationsPerTransaction, new OCallable<Void, OBaseWorkLoadContext>() {
       @Override
       public Void call(final OBaseWorkLoadContext context) {
         final OWorkLoadContext graphContext = ((OWorkLoadContext) context);
         final OrientBaseGraph graph = graphContext.graph;
 
         for (int i = 0; i < startingVertices.size(); ++i) {
-          final Object commandResult = graph.command(new OCommandSQL("select shortestPath(?,?, 'out')"))
+          final Iterable<OrientVertex> commandResult = graph.command(new OCommandSQL("select shortestPath(?,?, 'both')"))
               .execute(startingVertices.get(context.currentIdx), startingVertices.get(i));
+
+          for (OrientVertex v : commandResult) {
+            Collection depth = v.getRecord().field("shortestPath");
+            if (depth != null && !depth.isEmpty()) {
+              totalDepth.addAndGet(depth.size());
+
+              long max = maxDepth.get();
+              while (depth.size() > max) {
+                if (maxDepth.compareAndSet(max, depth.size()))
+                  break;
+                max = maxDepth.get();
+              }
+            } else
+              notConnected.incrementAndGet();
+          }
         }
         result.current.incrementAndGet();
 
@@ -110,19 +138,18 @@ public class OGraphShortestPathWorkload extends OBaseGraphWorkload {
 
   @Override
   public String getPartialResult() {
-    return String.format("%d%% [Shortest paths executed: %d]", ((100 * result.current.get() / result.total)), result.current.get());
+    return String.format("%d%% [Shortest paths blocks (block size=%d) executed: %d/%d]",
+        ((100 * result.current.get() / result.total)), startingVertices.size(), result.current.get(), startingVertices.size());
   }
 
   @Override
   public String getFinalResult() {
     final StringBuilder buffer = new StringBuilder(getErrors());
 
-    buffer.append(String.format("\nExecuted %d shortest paths in %.3f secs", result.current.get(), result.totalTime / 1000f));
-
-    buffer.append(
-        String.format("\n- Throughput: %.3f/sec - Avg: %.3fms/op (%dth percentile) - 99th Perc: %.3fms - 99.9th Perc: %.3fms",
-            result.total * 1000 / (float) result.totalTime, result.avgNs / 1000000f, result.percentileAvg,
-            result.percentile99Ns / 1000000f, result.percentile99_9Ns / 1000000f));
+    buffer.append(String.format("- Executed %d shortest paths in %.3f secs", result.current.get(), result.totalTime / 1000f));
+    buffer.append(String.format("\n- Path depth: maximum %d, average %.3f, not connected %d", maxDepth.get(),
+        totalDepth.get() / (float) startingVertices.size() / (float) startingVertices.size(), notConnected.get()));
+    buffer.append(result.toOutput(1));
 
     return buffer.toString();
   }
@@ -131,9 +158,11 @@ public class OGraphShortestPathWorkload extends OBaseGraphWorkload {
   public String getFinalResultAsJson() {
     final ODocument json = new ODocument();
 
+    json.field("type", getName());
+
     json.field("shortestPath", result.toJSON(), OType.EMBEDDED);
 
-    return json.toString();
+    return json.toJSON("");
   }
 
   private char assignState(final char state, final StringBuilder number, final char c) {
@@ -145,11 +174,6 @@ public class OGraphShortestPathWorkload extends OBaseGraphWorkload {
 
     number.setLength(0);
     return c;
-  }
-
-  @Override
-  protected OBaseWorkLoadContext getContext() {
-    return new OWorkLoadContext();
   }
 
   public int getShortestPaths() {

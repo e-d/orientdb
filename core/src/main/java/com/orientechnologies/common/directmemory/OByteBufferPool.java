@@ -26,15 +26,24 @@ import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 
 import javax.management.*;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.lang.management.ManagementFactory;
+import java.lang.ref.ReferenceQueue;
+import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.logging.LogManager;
 
 /**
  * Object of this class works at the same time as factory for <code>DirectByteBuffer</code> objects and pool for
@@ -52,7 +61,22 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
    */
   public static final String MBEAN_NAME = "com.orientechnologies.common.directmemory:type=OByteBufferPoolMXBean";
 
+  /**
+   * Pool returned by this method is used in all components of storage. Memory used by this pool is preallocated by chunks with size
+   * not more than {@link OGlobalConfiguration#MEMORY_CHUNK_SIZE} Amount of maximum memory preallocated by this pool equals to sum
+   * of {@link OGlobalConfiguration#DISK_CACHE_SIZE} and {@link OGlobalConfiguration#WAL_CACHE_SIZE} and one.
+   * <p>
+   * Size of single page equals to {@link OGlobalConfiguration#DISK_CACHE_PAGE_SIZE}.
+   *
+   * @return Global instance is used inside of storage.
+   */
+  public static OByteBufferPool instance() {
+    return INSTANCE;
+  }
+
   private static final OByteBufferPool INSTANCE;
+
+  private static final boolean TRACK = OGlobalConfiguration.DIRECT_MEMORY_TRACK_MODE.getValueAsBoolean();
 
   static {
     // page size in bytes
@@ -76,7 +100,7 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
   private final ByteBuffer zeroPage;
 
   /**
-   * Collections of chunks which are prealocated on demand when limit of currently allocated memory exceeds.
+   * Collections of chunks which are preallocated on demand when limit of currently allocated memory exceeds.
    */
   private final AtomicReference<BufferHolder> lastPreallocatedArea;
 
@@ -105,18 +129,10 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
    */
   private final AtomicBoolean mbeanIsRegistered = new AtomicBoolean();
 
-  /**
-   * Pool returned by this method is used in all components of storage. Memory used by this pool is preallocated by chunks with size
-   * not more than {@link OGlobalConfiguration#MEMORY_CHUNK_SIZE} Amount of maximum memory preallocated by this pool equals to sum
-   * of {@link OGlobalConfiguration#DISK_CACHE_SIZE} and {@link OGlobalConfiguration#WAL_CACHE_SIZE} and one.
-   * <p>
-   * Size of single page equals to {@link OGlobalConfiguration#DISK_CACHE_PAGE_SIZE}.
-   *
-   * @return Global instance is used inside of storage.
-   */
-  public static OByteBufferPool instance() {
-    return INSTANCE;
-  }
+  private final ReferenceQueue<ByteBuffer>                    trackedBuffersQueue;
+  private final Set<TrackedBufferReference>                   trackedReferences;
+  private final Map<TrackedBufferKey, TrackedBufferReference> trackedBuffers;
+  private final Map<TrackedBufferKey, Exception>              trackedReleases;
 
   /**
    * @param pageSize Size of single page (instance of <code>DirectByteBuffer</code>) returned by pool.
@@ -127,7 +143,7 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
 
   /**
    * @param pageSize     Size of single page (<code>DirectByteBuffer</code>) returned by pool.
-   * @param maxChunkSize
+   * @param maxChunkSize Maximum allocation chunk size
    */
   public OByteBufferPool(int pageSize, int maxChunkSize) {
     this.pageSize = pageSize;
@@ -147,6 +163,18 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
     } else {
       maxPagesPerSingleArea = 1;
       lastPreallocatedArea = null;
+    }
+
+    if (TRACK) {
+      trackedBuffersQueue = new ReferenceQueue<ByteBuffer>();
+      trackedReferences = new HashSet<TrackedBufferReference>();
+      trackedBuffers = new HashMap<TrackedBufferKey, TrackedBufferReference>();
+      trackedReleases = new HashMap<TrackedBufferKey, Exception>();
+    } else {
+      trackedBuffersQueue = null;
+      trackedReferences = null;
+      trackedBuffers = null;
+      trackedReleases = null;
     }
   }
 
@@ -169,6 +197,7 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
    * the smallest number of iterations possible and then increment result value by 1.
    *
    * @param value Integer the most significant power of 2 should be found.
+   *
    * @return The most significant power of 2.
    */
   private int closestPowerOfTwo(int value) {
@@ -191,6 +220,7 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
    * Position of returned buffer is always zero.
    *
    * @param clear Whether returned buffer should be filled with zeros before return.
+   *
    * @return Direct memory buffer instance.
    */
   public ByteBuffer acquireDirect(boolean clear) {
@@ -204,7 +234,8 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
       }
 
       buffer.position(0);
-      return buffer;
+
+      return trackBuffer(buffer);
     }
 
     if (maxPagesPerSingleArea > 1) {
@@ -254,12 +285,12 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
               }
             }
 
-            final BufferHolder nbfh = new BufferHolder(bufferIndex);
-            if (lastPreallocatedArea.compareAndSet(bfh, nbfh)) {
-              bfh = nbfh;
+            final BufferHolder bufferHolder = new BufferHolder(bufferIndex);
+            if (lastPreallocatedArea.compareAndSet(bfh, bufferHolder)) {
+              bfh = bufferHolder;
               allocateBuffer(bfh);
             } else {
-              assert nbfh.index == bufferIndex;
+              assert bufferHolder.index == bufferIndex;
               continue;
             }
           }
@@ -280,7 +311,7 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
           }
 
           slice.position(0);
-          return slice;
+          return trackBuffer(slice);
         }
       } finally {
         //we put this in final block to be sure that indication about processed memory request was for sure reflected
@@ -295,7 +326,7 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
 
     // this should not happen if amount of pages is needed for storage is calculated correctly
     overflowBufferCount.incrementAndGet();
-    return ByteBuffer.allocateDirect(pageSize).order(ByteOrder.nativeOrder());
+    return trackBuffer(ByteBuffer.allocateDirect(pageSize).order(ByteOrder.nativeOrder()));
   }
 
   /**
@@ -318,7 +349,7 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
    * @param buffer Not used instance of buffer.
    */
   public void release(ByteBuffer buffer) {
-    pool.offer(buffer);
+    pool.offer(untrackBuffer(buffer));
   }
 
   @Override
@@ -414,6 +445,31 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
     }
   }
 
+  /**
+   * Verifies the state of this byte buffer pool for a consistency, leaks, etc. {@link OGlobalConfiguration#DIRECT_MEMORY_TRACK_MODE}
+   * must be on, otherwise this method does nothing. Detected problems will be printed to the error log. If assertions are on and
+   * erroneous state is detected, verification will fail with {@link AssertionError} exception.
+   */
+  public void verifyState() {
+    if (TRACK) {
+      synchronized (this) {
+        final boolean logsInAssertions = logInAssertion();
+        final StringBuilder builder = logsInAssertions ? new StringBuilder() : null;
+
+        for (TrackedBufferReference reference : trackedReferences)
+          log(builder, this, "DIRECT-TRACK: unreleased direct memory buffer `%X` detected.", reference.stackTrace, reference.id);
+
+        checkTrackedBuffersLeaks(builder);
+
+        if (logsInAssertions) {
+          if (builder.length() > 0)
+            throw new AssertionError(builder.toString());
+        } else
+          assert trackedReferences.size() == 0;
+      }
+    }
+  }
+
   private static final class BufferHolder {
     private volatile ByteBuffer buffer;
     private final CountDownLatch latch = new CountDownLatch(1);
@@ -457,4 +513,140 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
     }
 
   }
+
+  private ByteBuffer trackBuffer(ByteBuffer buffer) {
+    if (TRACK) {
+      synchronized (this) {
+        final boolean logInAssertion = logInAssertion();
+        final StringBuilder logBuilder = logInAssertion ? new StringBuilder() : null;
+
+        final TrackedBufferReference reference = new TrackedBufferReference(buffer, trackedBuffersQueue);
+        trackedReferences.add(reference);
+        trackedBuffers.put(new TrackedBufferKey(buffer), reference);
+
+        checkTrackedBuffersLeaks(logBuilder);
+
+        if (logInAssertion && logBuilder.length() > 0)
+          throw new AssertionError(logBuilder.toString());
+      }
+    }
+
+    return buffer;
+  }
+
+  @SuppressWarnings({ "ThrowableResultOfMethodCallIgnored" })
+  private ByteBuffer untrackBuffer(ByteBuffer buffer) {
+    if (TRACK) {
+      synchronized (this) {
+        final boolean logInAssertion = logInAssertion();
+        final StringBuilder logBuilder = logInAssertion ? new StringBuilder() : null;
+
+        final TrackedBufferKey trackedBufferKey = new TrackedBufferKey(buffer);
+
+        final TrackedBufferReference reference = trackedBuffers.remove(trackedBufferKey);
+        if (reference == null) {
+          log(logBuilder, this, "DIRECT-TRACK: untracked direct byte buffer `%X` detected.", new Exception(), id(buffer));
+
+          final Exception lastRelease = trackedReleases.get(trackedBufferKey);
+          if (lastRelease != null)
+            log(logBuilder, this, "DIRECT-TRACK: last release.", lastRelease);
+
+          if (logInAssertion) {
+            if (logBuilder.length() > 0)
+              throw new AssertionError(logBuilder.toString());
+          } else
+            assert false;
+        } else
+          trackedReferences.remove(reference);
+
+        trackedReleases.put(trackedBufferKey, new Exception());
+
+        checkTrackedBuffersLeaks(logBuilder);
+        if (logInAssertion && logBuilder.length() > 0)
+          throw new AssertionError(logBuilder.toString());
+      }
+    }
+
+    return buffer;
+  }
+
+  private void checkTrackedBuffersLeaks(StringBuilder logBuilder) {
+    boolean leaked = false;
+
+    TrackedBufferReference reference;
+    while ((reference = (TrackedBufferReference) trackedBuffersQueue.poll()) != null) {
+      if (trackedReferences.remove(reference)) {
+        log(logBuilder, this, "DIRECT-TRACK: unreleased direct byte buffer `%X` detected.", reference.stackTrace, reference.id);
+        leaked = true;
+      }
+    }
+
+    if (logBuilder == null)
+      assert !leaked;
+  }
+
+  private static int id(Object object) {
+    return System.identityHashCode(object);
+  }
+
+  @SuppressWarnings("AssertWithSideEffects")
+  private static boolean logInAssertion() {
+    boolean assertionsEnabled = false;
+    assert assertionsEnabled = true;
+    return assertionsEnabled && !(LogManager.getLogManager() instanceof OLogManager.DebugLogManager);
+  }
+
+  private static void log(StringBuilder builder, final Object from, final String message, final Throwable exception,
+      final Object... args) {
+    if (builder == null)
+      OLogManager.instance().error(from, message, exception, args);
+    else {
+      final String newLine = String.format("%n");
+      builder.append(String.format(message, args)).append(newLine);
+      if (exception != null) {
+        final StringWriter stringWriter = new StringWriter();
+        final PrintWriter printWriter = new PrintWriter(stringWriter);
+        exception.printStackTrace(printWriter);
+        builder.append(stringWriter.toString());
+      }
+    }
+  }
+
+  private static class TrackedBufferReference extends WeakReference<ByteBuffer> {
+
+    public final int       id;
+    public final Exception stackTrace;
+
+    public TrackedBufferReference(ByteBuffer referent, ReferenceQueue<? super ByteBuffer> q) {
+      super(referent, q);
+
+      this.id = id(referent);
+      this.stackTrace = new Exception();
+    }
+
+  }
+
+  private static class TrackedBufferKey extends WeakReference<ByteBuffer> {
+
+    private final int hashCode;
+
+    public TrackedBufferKey(ByteBuffer referent) {
+      super(referent);
+      hashCode = System.identityHashCode(referent);
+    }
+
+    @Override
+    public int hashCode() {
+      return hashCode;
+    }
+
+    @SuppressWarnings("EqualsWhichDoesntCheckParameterClass")
+    @Override
+    public boolean equals(Object obj) {
+      final ByteBuffer buffer = get();
+      return buffer != null && buffer == ((TrackedBufferKey) obj).get();
+    }
+
+  }
+
 }

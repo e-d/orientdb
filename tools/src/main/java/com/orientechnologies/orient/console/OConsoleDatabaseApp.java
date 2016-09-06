@@ -28,6 +28,7 @@ import com.orientechnologies.common.io.OFileUtils;
 import com.orientechnologies.common.io.OIOException;
 import com.orientechnologies.common.listener.OProgressListener;
 import com.orientechnologies.common.log.OLogManager;
+import com.orientechnologies.orient.client.remote.ODatabaseImportRemote;
 import com.orientechnologies.orient.client.remote.OEngineRemote;
 import com.orientechnologies.orient.client.remote.OServerAdmin;
 import com.orientechnologies.orient.client.remote.OStorageRemote;
@@ -90,6 +91,7 @@ import sun.misc.SignalHandler;
 
 import java.io.*;
 import java.lang.reflect.Array;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.Map.Entry;
 
@@ -318,7 +320,7 @@ public class OConsoleDatabaseApp extends OrientConsole implements OCommandOutput
       final String dbURL = databaseURL.substring(OEngineRemote.NAME.length() + 1);
       OServerAdmin serverAdmin = new OServerAdmin(dbURL).connect(userName, userPassword);
       serverAdmin.createDatabase(serverAdmin.getStorageName(), databaseType, storageType, backupPath).close();
-      connect(databaseURL, OUser.ADMIN, OUser.ADMIN);
+      connect(databaseURL, userName, userPassword);
 
     } else {
       // LOCAL CONNECTION
@@ -1509,7 +1511,7 @@ public class OConsoleDatabaseApp extends OrientConsole implements OCommandOutput
           resultSet.add(row);
 
           row.field("NAME", p.getName());
-          row.field("TYPE", p.getType());
+          row.field("TYPE", (Object) p.getType());
           row.field("LINKED-TYPE/CLASS", p.getLinkedClass() != null ? p.getLinkedClass() : p.getLinkedType());
           row.field("MANDATORY", p.isMandatory());
           row.field("READONLY", p.isReadonly());
@@ -2120,11 +2122,20 @@ public class OConsoleDatabaseApp extends OrientConsole implements OCommandOutput
     final String options = fileName != null ? text.substring((items.get(0)).length() + (items.get(1)).length() + 1).trim() : text;
 
     try {
-      ODatabaseImport databaseImport = new ODatabaseImport(currentDatabase, fileName, this);
+      if (currentDatabase.getStorage().isRemote()) {
+        ODatabaseImportRemote databaseImport = new ODatabaseImportRemote(currentDatabase, fileName, this);
 
-      databaseImport.setOptions(options).importDatabase();
+        databaseImport.setOptions(options);
+        databaseImport.importDatabase();
+        databaseImport.close();
 
-      databaseImport.close();
+      } else {
+        ODatabaseImport databaseImport = new ODatabaseImport(currentDatabase, fileName, this);
+
+        databaseImport.setOptions(options);
+        databaseImport.importDatabase();
+        databaseImport.close();
+      }
     } catch (ODatabaseImportException e) {
       printError(e);
     }
@@ -2198,12 +2209,15 @@ public class OConsoleDatabaseApp extends OrientConsole implements OCommandOutput
         final FileOutputStream fos = new FileOutputStream(fileName);
         try {
           currentDatabase.backup(fos, null, null, this, compressionLevel, bufferSize);
-
-        } finally {
           fos.flush();
           fos.close();
-
           message("\nBackup executed in %.2f seconds", ((float) (System.currentTimeMillis() - startTime) / 1000));
+        } catch (RuntimeException e) {
+          fos.close();
+          File f = new File(fileName);
+          if (f.exists())
+            f.delete();
+          throw e;
         }
       }
     } catch (ODatabaseExportException e) {
@@ -2244,7 +2258,6 @@ public class OConsoleDatabaseApp extends OrientConsole implements OCommandOutput
       message("\nDatabase restored in %.2f seconds", ((float) (System.currentTimeMillis() - startTime) / 1000));
     }
   }
-
 
   @ConsoleCommand(description = "Export a database", splitInWords = false, onlineHelp = "Console-Command-Export")
   public void exportDatabase(@ConsoleParameter(name = "options", description = "Export options") final String iText)
@@ -2767,10 +2780,11 @@ public class OConsoleDatabaseApp extends OrientConsole implements OCommandOutput
 
   @Override
   protected String getContext() {
+    final StringBuilder buffer = new StringBuilder(64);
+
     if (currentDatabase != null && currentDatabaseName != null) {
       currentDatabase.activateOnCurrentThread();
 
-      final StringBuilder buffer = new StringBuilder(64);
       buffer.append(" {db=");
       buffer.append(currentDatabaseName);
       if (currentDatabase.getTransaction().isActive()) {
@@ -2778,12 +2792,23 @@ public class OConsoleDatabaseApp extends OrientConsole implements OCommandOutput
         buffer.append(currentDatabase.getTransaction().getEntryCount());
         buffer.append(" entries]");
       }
+    } else if (serverAdmin != null) {
+      buffer.append(" {server=");
+      buffer.append(serverAdmin.getURL());
+    }
 
+    final String promptDateFormat = properties.get("promptDateFormat");
+    if (promptDateFormat != null) {
+      buffer.append(" (");
+      final SimpleDateFormat df = new SimpleDateFormat(promptDateFormat);
+      buffer.append(df.format(new Date()));
+      buffer.append(")");
+    }
+
+    if (buffer.length() > 0)
       buffer.append("}");
-      return buffer.toString();
-    } else if (serverAdmin != null)
-      return " {server=" + serverAdmin.getURL() + "}";
-    return "";
+
+    return buffer.toString();
   }
 
   @Override

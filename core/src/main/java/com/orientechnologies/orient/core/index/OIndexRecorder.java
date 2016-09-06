@@ -34,9 +34,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.locks.Lock;
 
 @SuppressFBWarnings("EQ_COMPARETO_USE_OBJECT_EQUALS")
 public class OIndexRecorder implements OIndex<OIdentifiable>, OIndexInternal<OIdentifiable> {
+  private static final Lock[] NO_LOCKS = new Lock[0];
+
   private final OIndexInternal<OIdentifiable> delegate;
 
   private final Set<Object>                   removedKeys = new HashSet<Object>();
@@ -163,6 +166,11 @@ public class OIndexRecorder implements OIndex<OIdentifiable>, OIndexInternal<OId
   @Override
   public ODocument checkEntry(OIdentifiable iRecord, Object iKey) {
     throw new UnsupportedOperationException("Not allowed operation");
+  }
+
+  @Override
+  public int getVersion() {
+    return -1;
   }
 
   @Override
@@ -336,19 +344,16 @@ public class OIndexRecorder implements OIndex<OIdentifiable>, OIndexInternal<OId
   }
 
   @Override
-  public void lockKeysForUpdateNoTx(Object... key) {
+  public void lockKeysForUpdate(Object... key) {
   }
 
   @Override
-  public void lockKeysForUpdateNoTx(Collection<Object> keys) {
+  public Lock[] lockKeysForUpdate(Collection<Object> keys) {
+    return NO_LOCKS;
   }
 
   @Override
-  public void releaseKeysForUpdateNoTx(Object... key) {
-  }
-
-  @Override
-  public void releaseKeysForUpdateNoTx(Collection<Object> keys) {
+  public void releaseKeysForUpdate(Object... key) {
   }
 
   @Override
@@ -394,5 +399,15 @@ public class OIndexRecorder implements OIndex<OIdentifiable>, OIndexInternal<OId
   @Override
   public void postCommit() {
     throw new UnsupportedOperationException("Not allowed operation");
+  }
+
+  @Override
+  public boolean acquireAtomicExclusiveLock(Object key) {
+    throw new UnsupportedOperationException("atomic locking is not supported by index recorder");
+  }
+
+  @Override
+  public String getIndexNameByKey(final Object key) {
+    return delegate.getName();
   }
 }

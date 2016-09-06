@@ -19,36 +19,30 @@
  */
 package com.orientechnologies.orient.graph.stresstest;
 
+import com.orientechnologies.orient.client.remote.OStorageRemote;
+import com.orientechnologies.orient.core.command.OCommandOutputListener;
 import com.orientechnologies.orient.core.db.ODatabase;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.stresstest.ODatabaseIdentifier;
 import com.orientechnologies.orient.stresstest.ODatabaseUtils;
 import com.orientechnologies.orient.stresstest.workload.OBaseWorkload;
-import com.tinkerpop.blueprints.impls.orient.OrientBaseGraph;
-import com.tinkerpop.blueprints.impls.orient.OrientGraph;
-import com.tinkerpop.blueprints.impls.orient.OrientGraphNoTx;
-import com.tinkerpop.blueprints.impls.orient.OrientVertex;
+import com.orientechnologies.orient.stresstest.workload.OCheckWorkload;
+import com.tinkerpop.blueprints.impls.orient.*;
 
 /**
  * CRUD implementation of the workload.
  *
  * @author Luca Garulli
  */
-public abstract class OBaseGraphWorkload extends OBaseWorkload {
-  protected boolean tx = false;
-
-  protected OBaseGraphWorkload(final boolean tx) {
-    this.tx = tx;
-  }
-
+public abstract class OBaseGraphWorkload extends OBaseWorkload implements OCheckWorkload {
   public class OWorkLoadContext extends OBaseWorkload.OBaseWorkLoadContext {
     OrientBaseGraph graph;
     OrientVertex    lastVertexToConnect;
     int             lastVertexEdges;
 
     @Override
-    public void init(ODatabaseIdentifier dbIdentifier) {
-      graph = tx ? getGraph(dbIdentifier) : getGraphNoTx(dbIdentifier);
+    public void init(ODatabaseIdentifier dbIdentifier, int operationsPerTransaction) {
+      graph = operationsPerTransaction > 0 ? getGraph(dbIdentifier) : getGraphNoTx(dbIdentifier);
     }
 
     @Override
@@ -58,8 +52,13 @@ public abstract class OBaseGraphWorkload extends OBaseWorkload {
     }
   }
 
+  @Override
+  protected OBaseWorkLoadContext getContext() {
+    return new OWorkLoadContext();
+  }
+
   protected OrientGraphNoTx getGraphNoTx(final ODatabaseIdentifier databaseIdentifier) {
-    final ODatabase database = ODatabaseUtils.openDatabase(databaseIdentifier);
+    final ODatabase database = ODatabaseUtils.openDatabase(databaseIdentifier, connectionStrategy);
     if (database == null)
       throw new IllegalArgumentException("Error on opening database " + databaseIdentifier.getName());
 
@@ -67,10 +66,35 @@ public abstract class OBaseGraphWorkload extends OBaseWorkload {
   }
 
   protected OrientGraph getGraph(final ODatabaseIdentifier databaseIdentifier) {
-    final ODatabase database = ODatabaseUtils.openDatabase(databaseIdentifier);
+    final ODatabase database = ODatabaseUtils.openDatabase(databaseIdentifier, connectionStrategy);
     if (database == null)
       throw new IllegalArgumentException("Error on opening database " + databaseIdentifier.getName());
 
-    return new OrientGraph((ODatabaseDocumentTx) database);
+    database.setProperty(OStorageRemote.PARAM_CONNECTION_STRATEGY, connectionStrategy.toString());
+
+    final OrientGraph g = new OrientGraph((ODatabaseDocumentTx) database);
+    g.setAutoStartTx(false);
+    return g;
+  }
+
+  @Override
+  public void check(final ODatabaseIdentifier databaseIdentifier) {
+    final OGraphRepair repair = new OGraphRepair();
+    repair.repair(getGraphNoTx(databaseIdentifier), new OCommandOutputListener() {
+      @Override
+      public void onMessage(String iText) {
+        System.out.print("   - " + iText);
+      }
+    });
+  }
+
+  @Override
+  protected void beginTransaction(final OBaseWorkLoadContext context) {
+    ((OWorkLoadContext) context).graph.begin();
+  }
+
+  @Override
+  protected void commitTransaction(final OBaseWorkLoadContext context) {
+    ((OWorkLoadContext) context).graph.commit();
   }
 }

@@ -20,6 +20,7 @@ import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.server.distributed.impl.ODistributedStorage;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.HashMap;
@@ -42,6 +43,7 @@ import static org.junit.Assert.assertTrue;
  *
  */
 
+@Ignore
 public class ThreeClientsRecordDeleteWithTransactionsOnMultipleServersScenarioTest extends AbstractScenarioTest {
 
   private final String        RECORD_ID = "R001";
@@ -82,7 +84,7 @@ public class ThreeClientsRecordDeleteWithTransactionsOnMultipleServersScenarioTe
     ((ODistributedStorage) dbServer2.getStorage()).setEventListener(new AfterRecordLockDelayer("server2", DOCUMENT_WRITE_TIMEOUT / 4));
     ((ODistributedStorage) dbServer3.getStorage()).setEventListener(new AfterRecordLockDelayer("server3", DOCUMENT_WRITE_TIMEOUT / 2));
 
-    // updates the same record from three different clients, each calling a different server
+    // deletes the same record from three different clients, each calling a different server
     List<Callable<Void>> clients = new LinkedList<Callable<Void>>();
     clients.add(new RecordDeleter(getDatabaseURL(serverInstance.get(0)), RECORD_ID, true));
     clients.add(new RecordDeleter(getDatabaseURL(serverInstance.get(1)), RECORD_ID, true));

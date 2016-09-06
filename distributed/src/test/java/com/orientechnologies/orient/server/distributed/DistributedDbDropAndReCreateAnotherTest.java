@@ -48,15 +48,13 @@ public class DistributedDbDropAndReCreateAnotherTest extends AbstractServerClust
         db.drop();
       }
 
-      Thread.sleep(2000);
-
       ServerRun server = serverInstance.get(lastServerNum);
 
       ++lastServerNum;
 
       final String dbName = getDatabaseURL(server);
 
-      banner("RE-CREATING DATABASE " + dbName + " ON SERVER " + server.getServerId());
+      banner("(RE)CREATING DATABASE " + dbName + " ON SERVER " + server.getServerId());
 
       final OrientGraphNoTx db = new OrientGraphNoTx(dbName);
       onAfterDatabaseCreation(db);
@@ -66,9 +64,7 @@ public class DistributedDbDropAndReCreateAnotherTest extends AbstractServerClust
 
     } while (lastServerNum < serverInstance.size());
 
-    Thread.sleep(2000);
-
-    executeMultipleTest();
+    executeMultipleTest(0);
   }
 
   protected String getDatabaseURL(final ServerRun server) {

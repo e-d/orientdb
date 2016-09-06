@@ -31,7 +31,8 @@ import java.util.Comparator;
  * Created by lomak_000 on 15.04.2015.
  */
 public interface OHashTable<K, V> {
-  void create(OBinarySerializer<K> keySerializer, OBinarySerializer<V> valueSerializer, OType[] keyTypes, boolean nullKeyIsSupported);
+  void create(OBinarySerializer<K> keySerializer, OBinarySerializer<V> valueSerializer, OType[] keyTypes,
+      boolean nullKeyIsSupported);
 
   OBinarySerializer<K> getKeySerializer();
 
@@ -74,6 +75,13 @@ public interface OHashTable<K, V> {
   void delete();
 
   void flush();
+
+  /**
+   * Acquires exclusive lock in the active atomic operation running on the current thread for this hash table.
+   */
+  void acquireAtomicExclusiveLock();
+
+  String getName();
 
   public static final class BucketPath {
     public final BucketPath parent;

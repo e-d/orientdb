@@ -28,7 +28,7 @@
     <parent>
         <groupId>com.orientechnologies</groupId>
         <artifactId>orientdb-parent</artifactId>
-        <version>2.2.3-XIMA</version>
+        <version>2.2.9-XIMA</version>
         <relativePath>../</relativePath>
     </parent>
 
@@ -52,7 +52,8 @@
             -Dstorage.configuration.syncOnUpdate=false
             -Ddb.makeFullCheckpointOnIndexChange=false
             -Ddb.makeFullCheckpointOnSchemaChange=false
-            -Dhazelcast.wait.seconds.before.join=1
+            -Dhazelcast.wait.seconds.before.join=3
+            -Djava.util.logging.manager=com.orientechnologies.common.log.OLogManager$DebugLogManager
         </argLine>
         <exclude.test.distributed>NONE</exclude.test.distributed>
     </properties>
@@ -99,6 +100,13 @@
             <groupId>com.orientechnologies</groupId>
             <artifactId>orientdb-test-commons</artifactId>
             <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.orientechnologies</groupId>
+            <artifactId>orientdb-core</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
             <scope>test</scope>
         </dependency>
         <dependency>
