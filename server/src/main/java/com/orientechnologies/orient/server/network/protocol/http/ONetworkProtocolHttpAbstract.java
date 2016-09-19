@@ -745,6 +745,7 @@ public abstract class ONetworkProtocolHttpAbstract extends ONetworkProtocol {
     cmdManager.registerCommand(new OServerCommandGetSupportedLanguages());
     cmdManager.registerCommand(new OServerCommandPostAuthToken());
     cmdManager.registerCommand(new OServerCommandGetSSO());
+    cmdManager.registerCommand(new OServerCommandGetBackupOnDemand());
     cmdManager.registerCommand(new OServerCommandGetPing());
 
     for (OServerCommandConfiguration c : iListener.getStatefulCommands())
