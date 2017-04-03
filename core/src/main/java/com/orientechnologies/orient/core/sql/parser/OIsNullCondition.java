@@ -9,7 +9,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-public class OIsNullCondition extends OBooleanExpression {
+public class OIsNullCondition extends OBooleanExpression{
 
   protected OExpression expression;
 
@@ -21,14 +21,15 @@ public class OIsNullCondition extends OBooleanExpression {
     super(p, id);
   }
 
-  /** Accept the visitor. **/
+  /**
+   * Accept the visitor.
+   **/
   public Object jjtAccept(OrientSqlVisitor visitor, Object data) {
     return visitor.visit(this, data);
   }
 
-  @Override
-  public boolean evaluate(OIdentifiable currentRecord, OCommandContext ctx) {
-    return false;
+  @Override public boolean evaluate(OIdentifiable currentRecord, OCommandContext ctx) {
+    return expression.execute(currentRecord, ctx) == null;
   }
 
   public OExpression getExpression() {
@@ -44,26 +45,26 @@ public class OIsNullCondition extends OBooleanExpression {
     builder.append(" is null");
   }
 
-
-  @Override
-  public boolean supportsBasicCalculation() {
+  @Override public boolean supportsBasicCalculation() {
     return expression.supportsBasicCalculation();
   }
 
-  @Override
-  protected int getNumberOfExternalCalculations() {
+  @Override protected int getNumberOfExternalCalculations() {
     if (expression.supportsBasicCalculation()) {
       return 0;
     }
     return 1;
   }
 
-  @Override
-  protected List<Object> getExternalCalculationConditions() {
+  @Override protected List<Object> getExternalCalculationConditions() {
     if (expression.supportsBasicCalculation()) {
       return Collections.EMPTY_LIST;
     }
     return (List) Collections.singletonList(expression);
+  }
+
+  @Override public List<String> getMatchPatternInvolvedAliases() {
+    return expression.getMatchPatternInvolvedAliases();
   }
 
 }

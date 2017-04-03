@@ -207,16 +207,16 @@ public class OrientGraphNoTx extends OrientBaseGraph {
           to = inDocument;
           if (edge == null) {
             if (settings.isKeepInMemoryReferences())
-              edge = new OrientEdge(graph, from.getIdentity(), to.getIdentity(), label);
+              edge = graph.getEdgeInstance(from.getIdentity(), to.getIdentity(), label);
             else
-              edge = new OrientEdge(graph, from, to, label);
+              edge = graph.getEdgeInstance( from, to, label);
           }
           edgeRecord = null;
         } else {
           lightWeightEdge = false;
           if (edge == null) {
             // CREATE THE EDGE DOCUMENT TO STORE FIELDS TOO
-            edge = new OrientEdge(graph, label, fields);
+            edge = graph.getEdgeInstance(label, fields);
             edgeRecord = edge.getRecord();
 
             if (settings.isKeepInMemoryReferences())
@@ -313,8 +313,8 @@ public class OrientGraphNoTx extends OrientBaseGraph {
         final OIdentifiable outVertex = edge.getOutVertex();
 
         if (outVertex != null) {
-          if (outVertex != null) {
-            outVertexRecord = outVertex.getRecord();
+          outVertexRecord = outVertex.getRecord();
+          if (outVertexRecord != null) {
             final String outFieldName = OrientVertex.getConnectionFieldName(Direction.OUT, edgeClassName,
                 useVertexFieldsForEdgeLabels);
             outVertexChanged = edge.dropEdgeFromVertex(inVertexEdge, outVertexRecord, outFieldName,

@@ -42,13 +42,13 @@ import java.util.List;
  * @author Luca Garulli (l.garulli--at--orientdb.com)
  */
 public abstract class OAbstract2pcTask extends OAbstractReplicatedTask {
-  protected static final long                   serialVersionUID  = 1L;
-  public static final String                    NON_LOCAL_CLUSTER = "_non_local_cluster";
+  protected static final long   serialVersionUID  = 1L;
+  public static final    String NON_LOCAL_CLUSTER = "_non_local_cluster";
 
-  protected List<OAbstractRecordReplicatedTask> tasks             = new ArrayList<OAbstractRecordReplicatedTask>();
+  protected List<OAbstractRecordReplicatedTask> tasks = new ArrayList<OAbstractRecordReplicatedTask>();
 
-  protected transient List<OAbstractRemoteTask> localUndoTasks    = new ArrayList<OAbstractRemoteTask>();
-  protected transient OTxTaskResult             result;
+  protected transient List<OAbstractRemoteTask> localUndoTasks = new ArrayList<OAbstractRemoteTask>();
+  protected transient OTxTaskResult result;
 
   public OAbstract2pcTask() {
   }
@@ -96,7 +96,9 @@ public abstract class OAbstract2pcTask extends OAbstractReplicatedTask {
     for (int i = 0; i < tasks.size(); ++i) {
       final OAbstractRecordReplicatedTask t = tasks.get(i);
 
-      final Object badResult = iBadResponse instanceof Throwable ? iBadResponse : ((OTxTaskResult) iBadResponse).results.get(i);
+      final Object badResult = iBadResponse == null ?
+          null :
+          iBadResponse instanceof Throwable ? iBadResponse : ((OTxTaskResult) iBadResponse).results.get(i);
       final Object goodResult = ((OTxTaskResult) iGoodResponse).results.get(i);
 
       final ORemoteTask undoTask = t.getFixTask(iRequest, t, badResult, goodResult, executorNodeName, dManager);
@@ -171,12 +173,26 @@ public abstract class OAbstract2pcTask extends OAbstractReplicatedTask {
     this.localUndoTasks = undoTasks;
   }
 
-  @Override
-  public OLogSequenceNumber getLastLSN() {
-    return lastLSN;
-  }
-
   public void setLastLSN(final OLogSequenceNumber lastLSN) {
     this.lastLSN = lastLSN;
+  }
+
+  @Override
+  public String toString() {
+    final StringBuilder buffer = new StringBuilder();
+
+    buffer.append("tx[");
+    buffer.append(tasks.size());
+    buffer.append("]{");
+
+    for (int i = 0; i < tasks.size(); ++i) {
+      final OAbstractRecordReplicatedTask task = tasks.get(i);
+      if (i > 0)
+        buffer.append(',');
+      buffer.append(task);
+    }
+
+    buffer.append("}");
+    return buffer.toString();
   }
 }

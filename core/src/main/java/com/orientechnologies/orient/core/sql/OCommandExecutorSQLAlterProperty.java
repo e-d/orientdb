@@ -28,10 +28,13 @@ import com.orientechnologies.orient.core.metadata.schema.OClassImpl;
 import com.orientechnologies.orient.core.metadata.schema.OProperty;
 import com.orientechnologies.orient.core.metadata.schema.OProperty.ATTRIBUTES;
 import com.orientechnologies.orient.core.metadata.schema.OPropertyImpl;
+import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.sql.parser.OAlterPropertyStatement;
 import com.orientechnologies.orient.core.sql.parser.OExpression;
+import com.orientechnologies.orient.core.util.ODateHelper;
 
 import java.util.Arrays;
+import java.util.Date;
 import java.util.Locale;
 import java.util.Map;
 
@@ -40,8 +43,8 @@ import java.util.Map;
  *
  * @author Luca Garulli
  */
-@SuppressWarnings("unchecked")
-public class OCommandExecutorSQLAlterProperty extends OCommandExecutorSQLAbstract implements OCommandDistributedReplicateRequest {
+@SuppressWarnings("unchecked") public class OCommandExecutorSQLAlterProperty extends OCommandExecutorSQLAbstract
+    implements OCommandDistributedReplicateRequest {
   public static final String KEYWORD_ALTER    = "ALTER";
   public static final String KEYWORD_PROPERTY = "PROPERTY";
 
@@ -79,8 +82,20 @@ public class OCommandExecutorSQLAlterProperty extends OCommandExecutorSQLAbstrac
         throw new OCommandSQLParsingException("Expected <class>.<property>. Use " + getSyntax(), parserText, oldPos);
 
       String[] parts = word.toString().split("\\.");
-      if (parts.length != 2)
-        throw new OCommandSQLParsingException("Expected <class>.<property>. Use " + getSyntax(), parserText, oldPos);
+      if (parts.length != 2) {
+        if (parts[1].startsWith("`") && parts[parts.length - 1].endsWith("`")) {
+          StringBuilder fullName = new StringBuilder();
+          for (int i = 1; i < parts.length; i++) {
+            if (i > 1) {
+              fullName.append(".");
+            }
+            fullName.append(parts[i]);
+          }
+          parts = new String[] { parts[0], fullName.toString() };
+        } else {
+          throw new OCommandSQLParsingException("Expected <class>.<property>. Use " + getSyntax(), parserText, oldPos);
+        }
+      }
 
       className = decodeClassName(parts[0]);
       if (className == null)
@@ -97,39 +112,45 @@ public class OCommandExecutorSQLAlterProperty extends OCommandExecutorSQLAbstrac
       try {
         attribute = OProperty.ATTRIBUTES.valueOf(attributeAsString.toUpperCase(Locale.ENGLISH));
       } catch (IllegalArgumentException e) {
-        throw new OCommandSQLParsingException("Unknown property attribute '" + attributeAsString + "'. Supported attributes are: "
-            + Arrays.toString(OProperty.ATTRIBUTES.values()), parserText, oldPos);
+        throw new OCommandSQLParsingException(
+            "Unknown property attribute '" + attributeAsString + "'. Supported attributes are: " + Arrays
+                .toString(OProperty.ATTRIBUTES.values()), parserText, oldPos);
       }
 
       value = parserText.substring(pos + 1).trim();
-      if(attribute.equals(ATTRIBUTES.NAME) ||attribute.equals(ATTRIBUTES.LINKEDCLASS)){
+      if (attribute.equals(ATTRIBUTES.NAME) || attribute.equals(ATTRIBUTES.LINKEDCLASS)) {
         value = decodeClassName(value);
       }
 
       if (value.length() == 0) {
-        throw new OCommandSQLParsingException("Missing property value to change for attribute '" + attribute + "'. Use "
-            + getSyntax(), parserText, oldPos);
+        throw new OCommandSQLParsingException(
+            "Missing property value to change for attribute '" + attribute + "'. Use " + getSyntax(), parserText, oldPos);
       }
 
-
-      if(preParsedStatement != null) {
+      if (preParsedStatement != null) {
         OAlterPropertyStatement stm = (OAlterPropertyStatement) preParsedStatement;
         OExpression settingExp = stm.settingValue;
         if (settingExp != null) {
           Object expValue = settingExp.execute(null, context);
-          if(expValue == null){
+          if (expValue == null) {
             expValue = settingExp.toString();
           }
-          value = expValue == null ? null : expValue.toString();
-          if(attribute.equals(ATTRIBUTES.NAME) ||attribute.equals(ATTRIBUTES.LINKEDCLASS)){
+          if (expValue != null) {
+            if (expValue instanceof Date) {
+              value = ODateHelper.getDateTimeFormatInstance().format((Date) expValue);
+            } else
+              value = expValue.toString();
+          } else
+            value = null;
+          if (attribute.equals(ATTRIBUTES.NAME) || attribute.equals(ATTRIBUTES.LINKEDCLASS)) {
             value = decodeClassName(value);
           }
         } else if (stm.customPropertyName != null) {
           value = "" + stm.customPropertyName.getStringValue() + "=" + stm.customPropertyValue.toString();
-        } else if(stm.clearCustom){
+        } else if (stm.clearCustom) {
           value = "clear";
         }
-      }else {
+      } else {
         if (value.equalsIgnoreCase("null")) {
           value = null;
         }
@@ -148,7 +169,6 @@ public class OCommandExecutorSQLAlterProperty extends OCommandExecutorSQLAbstrac
     return s.substring(1, s.length() - 1).replaceAll("\\\\\"", "\"");
   }
 
-
   private boolean isQuoted(String s) {
     s = s.trim();
     if (s.startsWith("\"") && s.endsWith("\""))
@@ -161,13 +181,11 @@ public class OCommandExecutorSQLAlterProperty extends OCommandExecutorSQLAbstrac
     return false;
   }
 
-  @Override
-  public long getDistributedTimeout() {
+  @Override public long getDistributedTimeout() {
     return OGlobalConfiguration.DISTRIBUTED_COMMAND_QUICK_TASK_SYNCH_TIMEOUT.getValueAsLong();
   }
 
-  @Override
-  public QUORUM_TYPE getQuorumType() {
+  @Override public QUORUM_TYPE getQuorumType() {
     return QUORUM_TYPE.ALL;
   }
 
@@ -186,7 +204,7 @@ public class OCommandExecutorSQLAlterProperty extends OCommandExecutorSQLAbstrac
     if (prop == null)
       throw new OCommandExecutionException("Property '" + className + "." + fieldName + "' not exists");
 
-    if("null".equalsIgnoreCase(value))
+    if ("null".equalsIgnoreCase(value))
       prop.set(attribute, null);
     else
       prop.set(attribute, value);

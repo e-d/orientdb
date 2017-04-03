@@ -42,7 +42,6 @@ import static org.junit.Assert.assertEquals;
  * - the three clients at the same time update the same record on different servers
  *
  */
-@Ignore
 // TODO Temporary Ignored
 public class ThreeClientsRecordUpdateWithTransactionsOnMultipleServersScenarioTest extends AbstractScenarioTest {
 
@@ -77,11 +76,11 @@ public class ThreeClientsRecordUpdateWithTransactionsOnMultipleServersScenarioTe
                                           };
 
   @Test
+  @Ignore
   public void test() throws Exception {
     maxRetries = 10;
     init(SERVERS);
     prepare(false);
-    executeWritesOnServers.addAll(serverInstance);
     execute();
   }
 

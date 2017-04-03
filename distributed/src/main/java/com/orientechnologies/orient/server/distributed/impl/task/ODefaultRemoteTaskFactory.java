@@ -87,8 +87,35 @@ public class ODefaultRemoteTaskFactory implements ORemoteTaskFactory {
     case ORepairClusterTask.FACTORYID: // 18
       return new ORepairClusterTask();
 
-    case OClusterRepairInfoTask.FACTORYID: // 18
+    case OClusterRepairInfoTask.FACTORYID: // 19
       return new OClusterRepairInfoTask();
+
+    case OFixCreateRecordTask.FACTORYID: // 20
+      return new OFixCreateRecordTask();
+
+    case OFixUpdateRecordTask.FACTORYID: // 21
+      return new OFixUpdateRecordTask();
+
+    case OStartReplicationTask.FACTORYID: // 22
+      return new OStartReplicationTask();
+
+    case ODropDatabaseTask.FACTORYID: // 23
+      return new ODropDatabaseTask();
+
+    case OUpdateDatabaseConfigurationTask.FACTORYID: // 24
+      return new OUpdateDatabaseConfigurationTask();
+
+    case OUpdateDatabaseStatusTask.FACTORYID: // 25
+      return new OUpdateDatabaseStatusTask();
+
+    case ODistributedLockTask.FACTORYID: // 26
+      return new ODistributedLockTask();
+
+    case ORequestDatabaseConfigurationTask.FACTORYID: // 27
+      return new ORequestDatabaseConfigurationTask();
+
+    case OUnreachableServerLocalTask.FACTORYID: // 28
+      new IllegalArgumentException("Task with code " + code + " is not supported in remote configuration");
     }
 
     throw new IllegalArgumentException("Task with code " + code + " is not supported");

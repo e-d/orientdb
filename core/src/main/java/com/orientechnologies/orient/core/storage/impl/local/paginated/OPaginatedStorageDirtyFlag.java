@@ -24,9 +24,7 @@ import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.exception.OStorageException;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
@@ -130,7 +128,6 @@ public class OPaginatedStorageDirtyFlag {
         channel.write(buffer);
       }
 
-
       dirtyFileData = new RandomAccessFile(dirtyFile, "rwd");
       channel = dirtyFileData.getChannel();
 
@@ -154,8 +151,9 @@ public class OPaginatedStorageDirtyFlag {
   public void close() throws IOException {
     lock.lock();
     try {
-      if (dirtyFile == null)
+      if (dirtyFile == null) {
         return;
+      }
 
       if (dirtyFile.exists()) {
         if (fileLock != null) {

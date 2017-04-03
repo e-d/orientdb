@@ -68,11 +68,17 @@ else
 fi
 export JAVA
 
+if [ -z "$ORIENTDB_LOG_CONF" ] ; then
+    ORIENTDB_LOG_CONF=$ORIENTDB_HOME/config/orientdb-server-log.properties
+fi
 
+if [ -z "$ORIENTDB_WWW_PATH" ] ; then
+    ORIENTDB_WWW_PATH=$ORIENTDB_HOME/www
+fi
 
-LOG_FILE=$ORIENTDB_HOME/config/orientdb-server-log.properties
-WWW_PATH=$ORIENTDB_HOME/www
+if [ -z "$ORIENTDB_PID" ] ; then
 ORIENTDB_PID=$ORIENTDB_HOME/bin/orient.pid
+fi
 
 if [ -f "$ORIENTDB_PID" ]; then
     echo "removing old pid file $ORIENTDB_PID"
@@ -90,10 +96,10 @@ for var in "$@"; do
     fi
 done
 
-# ORIENTDB memory options, default to 512 of heap.
+# ORIENTDB memory options, default to 2GB of heap.
 
 if [ -z "$ORIENTDB_OPTS_MEMORY" ] ; then
-    ORIENTDB_OPTS_MEMORY="-Xms512m -Xmx512m"
+    ORIENTDB_OPTS_MEMORY="-Xms2G -Xmx2G"
 fi
 
 if [ -z "$JAVA_OPTS_SCRIPT" ] ; then
@@ -107,10 +113,14 @@ fi
 
 echo $$ > $ORIENTDB_PID
 
-exec "$JAVA" $JAVA_OPTS $ORIENTDB_OPTS_MEMORY $JAVA_OPTS_SCRIPT $ORIENTDB_SETTINGS $DEBUG_OPTS \
-    -Djava.util.logging.config.file="$LOG_FILE" \
+exec "$JAVA" $JAVA_OPTS \
+    $ORIENTDB_OPTS_MEMORY \
+    $JAVA_OPTS_SCRIPT \
+    $ORIENTDB_SETTINGS \
+    $DEBUG_OPTS \
+    -Djava.util.logging.config.file="$ORIENTDB_LOG_CONF" \
     -Dorientdb.config.file="$CONFIG_FILE" \
-    -Dorientdb.www.path="$WWW_PATH" \
+    -Dorientdb.www.path="$ORIENTDB_WWW_PATH" \
     -Dorientdb.build.number="@BUILD@" \
     -cp "$ORIENTDB_HOME/lib/orientdb-server-@VERSION@.jar:$ORIENTDB_HOME/lib/*:$ORIENTDB_HOME/plugins/*" \
     $ARGS com.orientechnologies.orient.server.OServerMain

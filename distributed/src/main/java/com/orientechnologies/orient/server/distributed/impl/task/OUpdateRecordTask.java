@@ -92,8 +92,8 @@ public class OUpdateRecordTask extends OAbstractRecordReplicatedTask {
   public Object executeRecordTask(ODistributedRequestId requestId, final OServer iServer, ODistributedServerManager iManager,
       final ODatabaseDocumentInternal database) throws Exception {
     if (ODistributedServerLog.isDebugEnabled())
-      ODistributedServerLog.debug(this, iManager.getLocalNodeName(), getNodeSource(), DIRECTION.IN, "updating record %s/%s v.%d",
-          database.getName(), rid.toString(), version);
+      ODistributedServerLog.debug(this, iManager.getLocalNodeName(), getNodeSource(), DIRECTION.IN,
+          "Updating record %s/%s v.%d reqId=%s...", database.getName(), rid.toString(), version, requestId);
 
     prepareUndoOperation();
     if (previousRecord == null) {
@@ -160,13 +160,13 @@ public class OUpdateRecordTask extends OAbstractRecordReplicatedTask {
     if (iGoodResponse instanceof Integer) {
       // JUST VERSION
       final int versionCopy = ORecordVersionHelper.setRollbackMode((Integer) iGoodResponse);
-      return new OUpdateRecordTask(rid, content, versionCopy, recordType);
+      return new OFixUpdateRecordTask(rid, content, versionCopy, recordType);
 
     } else if (iGoodResponse instanceof ORecord) {
       // RECORD
       final ORecord goodRecord = (ORecord) iGoodResponse;
       final int versionCopy = ORecordVersionHelper.setRollbackMode(goodRecord.getVersion());
-      return new OUpdateRecordTask(rid, goodRecord.toStream(), versionCopy, recordType);
+      return new OFixUpdateRecordTask(rid, goodRecord.toStream(), versionCopy, recordType);
     }
 
     return null;
@@ -178,7 +178,7 @@ public class OUpdateRecordTask extends OAbstractRecordReplicatedTask {
       return null;
 
     final int versionCopy = ORecordVersionHelper.setRollbackMode(previousRecord.getVersion());
-    final OUpdateRecordTask task = new OUpdateRecordTask(rid, previousRecord.toStream(), versionCopy, recordType);
+    final OUpdateRecordTask task = new OFixUpdateRecordTask(rid, previousRecord.toStream(), versionCopy, recordType);
     task.setLockRecords(false);
     return task;
   }
@@ -227,7 +227,7 @@ public class OUpdateRecordTask extends OAbstractRecordReplicatedTask {
     if (previousRecord == null) {
       // READ DIRECTLY FROM THE UNDERLYING STORAGE
       final OStorageOperationResult<ORawBuffer> loaded = ODatabaseRecordThreadLocal.INSTANCE.get().getStorage().getUnderlying()
-          .readRecord(rid, null, true, null);
+          .readRecord(rid, null, true, false, null);
 
       if (loaded == null || loaded.getResult() == null)
         return null;

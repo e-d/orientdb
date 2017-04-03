@@ -22,10 +22,9 @@ import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.sql.OCommandSQL;
 import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
-import com.orientechnologies.orient.server.distributed.ODistributedConfiguration;
+import com.orientechnologies.orient.server.distributed.OModifiableDistributedConfiguration;
 import com.orientechnologies.orient.server.distributed.ServerRun;
 import com.orientechnologies.orient.server.hazelcast.OHazelcastPlugin;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.LinkedList;
@@ -58,12 +57,10 @@ import static org.junit.Assert.*;
 
 public class ShutdownAndRestartNodeScenarioTest extends AbstractScenarioTest {
 
-  @Ignore
   @Test
   public void test() throws Exception {
     init(SERVERS);
     prepare(false);
-    super.executeWritesOnServers.addAll(super.serverInstance);
     execute();
   }
 
@@ -236,11 +233,11 @@ public class ShutdownAndRestartNodeScenarioTest extends AbstractScenarioTest {
         ODocument cfg = null;
         ServerRun server = serverInstance.get(0);
         OHazelcastPlugin manager = (OHazelcastPlugin) server.getServerInstance().getDistributedManager();
-        ODistributedConfiguration databaseConfiguration = manager.getDatabaseConfiguration(getDatabaseName());
+        OModifiableDistributedConfiguration databaseConfiguration = manager.getDatabaseConfiguration(getDatabaseName()).modify();
         cfg = databaseConfiguration.getDocument();
         cfg.field("writeQuorum", 3);
         cfg.field("version", (Integer) cfg.field("version") + 1);
-        manager.updateCachedDatabaseConfiguration(getDatabaseName(), cfg, true, true);
+        manager.updateCachedDatabaseConfiguration(getDatabaseName(), databaseConfiguration, true);
 
         System.out.println("\nConfiguration updated.");
 
@@ -257,7 +254,7 @@ public class ShutdownAndRestartNodeScenarioTest extends AbstractScenarioTest {
           fail("Error: record inserted with 2 server running and writeWuorum=3.");
         } catch (Exception e) {
           e.printStackTrace();
-          assertTrue("Record not inserted because there are 2 server running and writeWuorum=3.", true);
+          assertTrue("Record not inserted because there are 2 servers running and writeQuorum=3.", true);
         }
         System.out.println("Done.\n");
 

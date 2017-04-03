@@ -1,9 +1,13 @@
 package com.orientechnologies.orient.jdbc;
 
+import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.sql.OCommandSQL;
+import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
 import org.junit.Test;
 
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -75,6 +79,63 @@ public class OrientJdbcResultSetTest extends OrientJdbcBaseTest {
     ResultSet rs = stmt.executeQuery("select \"stringKey\",\"published\" from item");
 
     assertThat(rs.next()).isTrue();
+
+  }
+
+  @Test
+  public void shouldReadRowWithNullValue() throws Exception {
+
+    db.activateOnCurrentThread();
+    db.command(new OCommandSQL("INSERT INTO Article(uuid,date, title, content) VALUES (123456, null, 'title', 'the content')"))
+        .execute();
+
+    List<ODocument> docs = db.query(
+        new OSQLSynchQuery<ODocument>("SELECT uuid,date, title, content FROM Article WHERE uuid = 123456"));
+
+    Statement stmt = conn.createStatement();
+
+    assertThat(stmt.execute("SELECT uuid,date, title, content FROM Article WHERE uuid = 123456")).isTrue();
+    ResultSet rs = stmt.getResultSet();
+    assertThat(rs).isNotNull();
+
+    assertThat(rs.getFetchSize()).isEqualTo(1);
+
+    rs.getLong("uuid");
+    rs.getDate(2);
+
+  }
+
+  @Test
+  public void shouldSelectWithDistinct() throws Exception {
+
+    Statement stmt = conn.createStatement();
+
+    assertThat(stmt.execute("SELECT DISTINCT(published) AS published FROM Item ")).isTrue();
+
+    ResultSet rs = stmt.getResultSet();
+    assertThat(rs).isNotNull();
+
+    assertThat(rs.getFetchSize()).isEqualTo(2);
+
+    assertThat(rs.getBoolean(1)).isEqualTo(true);
+    assertThat(rs.getBoolean("published")).isEqualTo(true);
+
+  }
+
+  @Test
+  public void shouldSelectWithSum() throws Exception {
+
+    Statement stmt = conn.createStatement();
+
+    assertThat(stmt.execute("SELECT SUM(score) AS totalScore FROM Item ")).isTrue();
+
+    ResultSet rs = stmt.getResultSet();
+    assertThat(rs).isNotNull();
+
+    assertThat(rs.getFetchSize()).isEqualTo(1);
+
+    assertThat(rs.getLong(1)).isEqualTo(3438);
+    assertThat(rs.getLong("totalScore")).isEqualTo(3438);
 
   }
 

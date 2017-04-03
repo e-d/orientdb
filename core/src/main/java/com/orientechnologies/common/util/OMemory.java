@@ -41,6 +41,7 @@ public class OMemory {
 
   /**
    * @param unlimitedCap the upper limit on reported memory, if JVM reports unlimited memory.
+   *
    * @return same as {@link Runtime#maxMemory()} except that {@code unlimitedCap} limit is applied if JVM reports
    * {@link Long#MAX_VALUE unlimited memory}.
    */
@@ -119,7 +120,7 @@ public class OMemory {
   /**
    * Checks the direct memory configuration and emits a warning if configuration is invalid.
    */
-  public static void checkDirectMemoryConfiguration() throws OConfigurationException {
+  public static void checkDirectMemoryConfiguration() {
     final long physicalMemory = getPhysicalMemorySize();
     final long maxDirectMemory = getConfiguredMaxDirectMemory();
 
@@ -132,7 +133,10 @@ public class OMemory {
         OLogManager.instance().warn(OMemory.class, "MaxDirectMemorySize JVM option is not set or has invalid value, "
             + "that may cause out of memory errors. Please set the -XX:MaxDirectMemorySize=<SIZE>m JVM option "
             + "when you start the JVM, where <SIZE> is the memory size of this machine in megabytes.");
-    }
+    } else if (maxDirectMemory < 64 * 1024 * 1024)
+      throw new OConfigurationException("MaxDirectMemorySize JVM option value is too low (" + maxDirectMemory + " bytes),"
+          + " OrientDB requires at least 64MB of direct memory to function properly. Please tune the value of "
+          + "-XX:MaxDirectMemorySize JVM option.");
   }
 
   /**
@@ -145,8 +149,8 @@ public class OMemory {
     final long maxDirectMemory = getConfiguredMaxDirectMemory();
 
     if (maxDirectMemory != -1 && maxCacheSize > maxDirectMemory)
-      OLogManager.instance().warn(OMemory.class, "Configured maximum amount of memory available to the cache (" + maxCacheSize +
-          " bytes) is larger than configured JVM maximum direct memory size (" + maxDirectMemory + " bytes). That may cause "
+      OLogManager.instance().warn(OMemory.class, "Configured maximum amount of memory available to the cache (" + maxCacheSize
+          + " bytes) is larger than configured JVM maximum direct memory size (" + maxDirectMemory + " bytes). That may cause "
           + "out of memory errors, please tune the configuration up. Use the -XX:MaxDirectMemorySize JVM option to raise the JVM "
           + "maximum direct memory size or storage.diskCache.bufferSize OrientDB option to lower memory requirements of the "
           + "cache.");
@@ -193,15 +197,25 @@ public class OMemory {
    */
   public static void fixCommonConfigurationProblems() {
     final long maxDirectMemory = OMemory.getConfiguredMaxDirectMemory();
+    long diskCacheSize = OGlobalConfiguration.DISK_CACHE_SIZE.getValueAsLong();
 
     if (maxDirectMemory != -1) {
       final long maxDiskCacheSize = Math.min(maxDirectMemory / 1024 / 1024, Integer.MAX_VALUE);
-      final long diskCacheSize = OGlobalConfiguration.DISK_CACHE_SIZE.getValueAsLong();
+
       if (diskCacheSize > maxDiskCacheSize) {
         OLogManager.instance()
             .info(OGlobalConfiguration.class, "Lowering disk cache size from %,dMB to %,dMB.", diskCacheSize, maxDiskCacheSize);
         OGlobalConfiguration.DISK_CACHE_SIZE.setValue(maxDiskCacheSize);
+        diskCacheSize = maxDiskCacheSize;
       }
+    }
+
+    final int max32BitCacheSize = 512;
+    if (getJavaBitWidth() == 32 && diskCacheSize > max32BitCacheSize) {
+      OLogManager.instance()
+          .info(OGlobalConfiguration.class, "32 bit JVM is detected. Lowering disk cache size from %,dMB to %,dMB.", diskCacheSize,
+              max32BitCacheSize);
+      OGlobalConfiguration.DISK_CACHE_SIZE.setValue(max32BitCacheSize);
     }
 
     if (OGlobalConfiguration.MEMORY_CHUNK_SIZE.getValueAsLong()
@@ -213,13 +227,28 @@ public class OMemory {
     }
   }
 
+  private static int getJavaBitWidth() {
+    // Figure out whether bit width of running JVM
+    // Most of JREs support property "sun.arch.data.model" which is exactly what we need here
+    String dataModel = System.getProperty("sun.arch.data.model", "64"); // By default assume 64bit
+    int size = 64;
+    try {
+      size = Integer.parseInt(dataModel);
+    } catch (Throwable t) {
+      // Ignore
+    }
+    return size;
+  }
+
   /**
    * Parses the size specifier formatted in the JVM style, like 1024k or 4g.
    * Following units are supported: k or K – kilobytes, m or M – megabytes, g or G – gigabytes.
    * If no unit provided, it is bytes.
    *
    * @param text the text to parse.
+   *
    * @return the parsed size value.
+   *
    * @throws IllegalArgumentException if size specifier is not recognized as valid.
    */
   public static long parseVmArgsSize(String text) throws IllegalArgumentException {

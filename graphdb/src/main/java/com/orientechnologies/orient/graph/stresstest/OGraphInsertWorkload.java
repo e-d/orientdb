@@ -29,6 +29,7 @@ import com.orientechnologies.orient.stresstest.ODatabaseIdentifier;
 import com.orientechnologies.orient.stresstest.OStressTesterSettings;
 import com.tinkerpop.blueprints.impls.orient.OrientBaseGraph;
 import com.tinkerpop.blueprints.impls.orient.OrientVertex;
+import com.tinkerpop.blueprints.impls.orient.OrientVertexType;
 
 import java.util.List;
 import java.util.Random;
@@ -60,6 +61,18 @@ public class OGraphInsertWorkload extends OBaseGraphWorkload {
   }
 
   @Override
+  protected void init(OBaseWorkLoadContext context) {
+    synchronized (getClass()) {
+      final OrientBaseGraph g = ((OWorkLoadContext) context).graph;
+      if (g.getVertexType(className) == null) {
+        final OrientVertexType c = g.createVertexType(className);
+        c.createProperty("_id", OType.LONG);
+        c.createProperty("ts", OType.DATETIME);
+      }
+    }
+  }
+
+  @Override
   public void parseParameters(final String args) {
     final String ops = args.toUpperCase();
     char state = ' ';
@@ -86,14 +99,14 @@ public class OGraphInsertWorkload extends OBaseGraphWorkload {
   public void execute(final OStressTesterSettings settings, final ODatabaseIdentifier databaseIdentifier) {
     connectionStrategy = settings.loadBalancing;
 
-    final List<OBaseWorkLoadContext> contexts = executeOperation(databaseIdentifier, resultVertices, settings.concurrencyLevel,
-        settings.operationsPerTransaction, new OCallable<Void, OBaseWorkLoadContext>() {
+    final List<OBaseWorkLoadContext> contexts = executeOperation(databaseIdentifier, resultVertices, settings, new OCallable<Void, OBaseWorkLoadContext>() {
           @Override
           public Void call(final OBaseWorkLoadContext context) {
             final OWorkLoadContext graphContext = ((OWorkLoadContext) context);
             final OrientBaseGraph graph = graphContext.graph;
 
-            final OrientVertex v = graph.addVertex(null, "_id", resultVertices.current.get());
+            final OrientVertex v = graph.addVertex("class:" + className, "_id", resultVertices.current.get(), "ts",
+                System.currentTimeMillis());
 
             if (graphContext.lastVertexToConnect != null) {
               v.addEdge("E", graphContext.lastVertexToConnect);

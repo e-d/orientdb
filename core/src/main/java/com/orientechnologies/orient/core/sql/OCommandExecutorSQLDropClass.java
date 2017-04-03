@@ -45,6 +45,7 @@ public class OCommandExecutorSQLDropClass extends OCommandExecutorSQLAbstract im
 
   private String             className;
   private boolean            unsafe;
+  private boolean            ifExists       = false;
 
   public OCommandExecutorSQLDropClass parse(final OCommandRequest iRequest) {
     final OCommandRequestText textRequest = (OCommandRequestText) iRequest;
@@ -58,6 +59,7 @@ public class OCommandExecutorSQLDropClass extends OCommandExecutorSQLAbstract im
       if (strict) {
         this.className = ((ODropClassStatement) this.preParsedStatement).name.getStringValue();
         this.unsafe = ((ODropClassStatement) this.preParsedStatement).unsafe;
+        this.ifExists = ((ODropClassStatement) this.preParsedStatement).ifExists;
       } else {
         oldParsing((OCommandRequestText) iRequest);
       }
@@ -104,8 +106,9 @@ public class OCommandExecutorSQLDropClass extends OCommandExecutorSQLAbstract im
 
   @Override
   public long getDistributedTimeout() {
-    if (className != null)
-      return 10 * getDatabase().countClass(className);
+    final OClass cls = getDatabase().getMetadata().getSchema().getClass(className);
+    if (className != null && cls != null)
+      return OGlobalConfiguration.DISTRIBUTED_COMMAND_QUICK_TASK_SYNCH_TIMEOUT.getValueAsLong() + (2 * cls.count());
 
     return OGlobalConfiguration.DISTRIBUTED_COMMAND_QUICK_TASK_SYNCH_TIMEOUT.getValueAsLong();
   }
@@ -119,6 +122,9 @@ public class OCommandExecutorSQLDropClass extends OCommandExecutorSQLAbstract im
     }
 
     final ODatabaseDocument database = getDatabase();
+    if (ifExists && !database.getMetadata().getSchema().existsClass(className)) {
+      return true;
+    }
     final OClass cls = database.getMetadata().getSchema().getClass(className);
     if (cls == null) {
       return null;
@@ -161,7 +167,7 @@ public class OCommandExecutorSQLDropClass extends OCommandExecutorSQLAbstract im
 
   @Override
   public String getSyntax() {
-    return "DROP CLASS <class> [UNSAFE]";
+    return "DROP CLASS <class> [IF EXISTS] [UNSAFE]";
   }
 
   @Override

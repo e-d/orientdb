@@ -32,14 +32,8 @@ import org.testng.annotations.Optional;
 import org.testng.annotations.Parameters;
 import org.testng.annotations.Test;
 
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Collection;
-import java.util.Date;
-import java.util.GregorianCalendar;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.math.BigDecimal;
+import java.util.*;
 
 /**
  * If some of the tests start to fail then check cluster number in queries, e.g #7:1. It can be because the order of clusters could
@@ -333,7 +327,7 @@ public class SQLInsertTest extends DocumentDBBaseTest {
     ORID another = ((OIdentifiable) res1).getIdentity();
     final String sql = "INSERT INTO Actor2 RETURN $current.FirstName  FROM SELECT * FROM [" + doc.getIdentity().toString() + ","
         + another.toString() + "]";
-    ArrayList res3 = database.command(new OCommandSQL(sql)).execute();
+    List res3 = database.command(new OCommandSQL(sql)).execute();
     Assert.assertEquals(res3.size(), 2);
     Assert.assertTrue(((List) res3).get(0) instanceof ODocument);
     final ODocument res3doc = (ODocument) res3.get(0);
@@ -575,6 +569,56 @@ public class SQLInsertTest extends DocumentDBBaseTest {
     Assert.assertEquals(result.get(0).field("cluster"), "foo");
   }
 
+  public void testInsertEmbeddedBigDecimal() {
+    // issue #6670
+    database.getMetadata().getSchema().getOrCreateClass("TestInsertEmbeddedBigDecimal");
+    database.command(new OCommandSQL("create property TestInsertEmbeddedBigDecimal.ed embeddedlist decimal")).execute();
+    database.command(new OCommandSQL("INSERT INTO TestInsertEmbeddedBigDecimal CONTENT {\"ed\": [5,null,5]}")).execute();
+    List<ODocument> result = database.query(new OSQLSynchQuery<ODocument>("SELECT FROM TestInsertEmbeddedBigDecimal"));
+    Assert.assertEquals(result.size(), 1);
+    Iterable ed = result.get(0).field("ed");
+    Object o = ed.iterator().next();
+    Assert.assertEquals(o.getClass(), BigDecimal.class);
+    Assert.assertEquals(((BigDecimal)o).intValue(), 5);
+  }
+
+  public void testInsertQuotedString(){
+    database.getMetadata().getSchema().createClass("testInsertQuotedString");
+    String stm = "INSERT INTO `testInsertQuotedString` (name) VALUES ( \"\\\"foo\\\"\")";
+    database.command(new OCommandSQL(stm)).execute();
+    List<ODocument> result = database.query(new OSQLSynchQuery<Object>("SELECT FROM testInsertQuotedString"));
+    Assert.assertEquals(result.size(), 1);
+    Assert.assertEquals(result.get(0).field("name"), "\"foo\"");
+
+  }
+
+  public void testInsertQuotedString2(){
+    database.getMetadata().getSchema().createClass("testInsertQuotedString2");
+    String stm = "INSERT INTO `testInsertQuotedString2` (name) VALUES (?)";
+    database.command(new OCommandSQL(stm)).execute("\"foo\"");
+    List<ODocument> result = database.query(new OSQLSynchQuery<Object>("SELECT FROM testInsertQuotedString2"));
+    Assert.assertEquals(result.size(), 1);
+    Assert.assertEquals(result.get(0).field("name"), "\"foo\"");
+
+  }
+
+  public void testInsertJson1(){
+    database.getMetadata().getSchema().createClass("testInsertJson1");
+    database.getMetadata().getSchema().createClass("testInsertJson1x1");
+    database.getMetadata().getSchema().createClass("testInsertJson1x2");
+    String stm = "INSERT INTO `testInsertJson1` (deals) VALUES ( [{\"goods\":[{ \"GoodsDescription\":\" \\\" coma-->,<-- coma  \\\" \", \"@class\":\"testInsertJson1x1\",\"@type\":\"d\"}],\n"
+        + "\"@class\":\"testInsertJson1x2\",\"@type\":\"d\"}])";
+    database.command(new OCommandSQL(stm)).execute();
+    List<ODocument> result = database.query(new OSQLSynchQuery<Object>("SELECT FROM testInsertJson1"));
+    Assert.assertEquals(result.size(), 1);
+    Collection deals = result.get(0).field("deals");
+    ODocument values = (ODocument) deals.iterator().next();
+    Collection<ODocument> goods = (Collection<ODocument>) values.field("goods");
+    ODocument item = goods.iterator().next();
+
+    Assert.assertEquals(item.field("GoodsDescription"), " \" coma-->,<-- coma  \" ");
+
+  }
   private List<Long> getValidPositions(int clusterId) {
     final List<Long> positions = new ArrayList<Long>();
 

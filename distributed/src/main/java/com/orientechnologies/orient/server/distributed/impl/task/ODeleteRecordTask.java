@@ -21,7 +21,6 @@ package com.orientechnologies.orient.server.distributed.impl.task;
 
 import com.orientechnologies.orient.core.command.OCommandDistributedReplicateRequest;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
-import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.record.ORecord;
 import com.orientechnologies.orient.server.OServer;
@@ -40,7 +39,7 @@ import com.orientechnologies.orient.server.distributed.task.ORemoteTask;
  */
 public class ODeleteRecordTask extends OAbstractRecordReplicatedTask {
   private static final long serialVersionUID = 1L;
-  public static final int   FACTORYID        = 4;
+  public static final  int  FACTORYID        = 4;
 
   public ODeleteRecordTask() {
   }
@@ -61,8 +60,9 @@ public class ODeleteRecordTask extends OAbstractRecordReplicatedTask {
   @Override
   public Object executeRecordTask(ODistributedRequestId requestId, final OServer iServer, ODistributedServerManager iManager,
       final ODatabaseDocumentInternal database) throws Exception {
-    ODistributedServerLog.debug(this, iManager.getLocalNodeName(), null, DIRECTION.IN, "Delete record %s/%s v.%d",
-        database.getName(), rid.toString(), version);
+    ODistributedServerLog
+        .debug(this, iManager.getLocalNodeName(), null, DIRECTION.IN, "Deleting record %s/%s v.%d", database.getName(),
+            rid.toString(), version);
 
     prepareUndoOperation();
     if (previousRecord == null)
@@ -84,7 +84,7 @@ public class ODeleteRecordTask extends OAbstractRecordReplicatedTask {
   @Override
   public ORemoteTask getFixTask(final ODistributedRequest iRequest, final ORemoteTask iOriginalTask, final Object iBadResponse,
       final Object iGoodResponse, String executorNodeName, ODistributedServerManager dManager) {
-    return new ODeleteRecordTask(rid, version);
+    return new OFixCreateRecordTask(rid, version);
   }
 
   @Override
@@ -95,6 +95,11 @@ public class ODeleteRecordTask extends OAbstractRecordReplicatedTask {
     final OResurrectRecordTask task = new OResurrectRecordTask(previousRecord);
     task.setLockRecords(false);
     return task;
+  }
+
+  @Override
+  public void checkRecordExists() {
+    // AVOID TO RETURN RECORD NOT FOUND IF ALREADY DELETED
   }
 
   @Override

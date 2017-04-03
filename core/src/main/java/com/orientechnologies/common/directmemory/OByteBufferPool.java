@@ -23,7 +23,12 @@ import com.orientechnologies.common.concur.lock.OInterruptedException;
 import com.orientechnologies.common.exception.OException;
 import com.orientechnologies.common.exception.OSystemException;
 import com.orientechnologies.common.log.OLogManager;
+import com.orientechnologies.orient.core.OOrientShutdownListener;
+import com.orientechnologies.orient.core.OOrientStartupListener;
+import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
+import sun.misc.Cleaner;
+import sun.nio.ch.DirectBuffer;
 
 import javax.management.*;
 import java.io.PrintWriter;
@@ -33,16 +38,12 @@ import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.LogManager;
 
 /**
@@ -55,7 +56,7 @@ import java.util.logging.LogManager;
  *
  * @see OGlobalConfiguration#MEMORY_CHUNK_SIZE
  */
-public class OByteBufferPool implements OByteBufferPoolMXBean {
+public class OByteBufferPool implements OOrientStartupListener, OOrientShutdownListener, OByteBufferPoolMXBean {
   /**
    * {@link OByteBufferPool}'s MBean name.
    */
@@ -71,23 +72,10 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
    * @return Global instance is used inside of storage.
    */
   public static OByteBufferPool instance() {
-    return INSTANCE;
+    return InstanceHolder.INSTANCE;
   }
-
-  private static final OByteBufferPool INSTANCE;
 
   private static final boolean TRACK = OGlobalConfiguration.DIRECT_MEMORY_TRACK_MODE.getValueAsBoolean();
-
-  static {
-    // page size in bytes
-    final int pageSize = OGlobalConfiguration.DISK_CACHE_PAGE_SIZE.getValueAsInteger() * 1024;
-
-    // Maximum amount of chunk size which should be allocated at once by system
-    final int memoryChunkSize = OGlobalConfiguration.MEMORY_CHUNK_SIZE.getValueAsInteger();
-
-    // instance of byte buffer which should be used by all storage components
-    INSTANCE = new OByteBufferPool(pageSize, memoryChunkSize);
-  }
 
   /**
    * Size of single byte buffer instance in bytes.
@@ -97,12 +85,12 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
   /**
    * Page which is filled with zeros and used to speedup clear operation on page acquire operation {@link #acquireDirect(boolean)}.
    */
-  private final ByteBuffer zeroPage;
+  private ByteBuffer zeroPage = null;
 
   /**
-   * Collections of chunks which are preallocated on demand when limit of currently allocated memory exceeds.
+   * Map which contains collection of preallocated chunks and their indexes. Indexes are numbered in order of their allocation.
    */
-  private final AtomicReference<BufferHolder> lastPreallocatedArea;
+  private final ConcurrentHashMap<Integer, BufferHolder> preallocatedAreas = new ConcurrentHashMap<Integer, BufferHolder>();
 
   /**
    * Index of next page which will be allocated if pool is empty.
@@ -113,6 +101,11 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
    * Maximum amount of pages which should be allocated in single preallocated memory chunk.
    */
   private final int maxPagesPerSingleArea;
+
+  /**
+   * Limit of memory which will be allocated by big chunks (in pages)
+   */
+  private final long preAllocationLimit;
 
   /**
    * Pool of pages which are already allocated but not used any more.
@@ -138,16 +131,19 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
    * @param pageSize Size of single page (instance of <code>DirectByteBuffer</code>) returned by pool.
    */
   public OByteBufferPool(int pageSize) {
-    this(pageSize, -1);
+    this(pageSize, -1, -1);
   }
 
   /**
-   * @param pageSize     Size of single page (<code>DirectByteBuffer</code>) returned by pool.
-   * @param maxChunkSize Maximum allocation chunk size
+   * @param pageSize           Size of single page (<code>DirectByteBuffer</code>) returned by pool.
+   * @param maxChunkSize       Maximum allocation chunk size
+   * @param preAllocationLimit Limit of memory which will be allocated by big chunks
    */
-  public OByteBufferPool(int pageSize, int maxChunkSize) {
+  public OByteBufferPool(int pageSize, int maxChunkSize, long preAllocationLimit) {
     this.pageSize = pageSize;
     this.zeroPage = ByteBuffer.allocateDirect(pageSize).order(ByteOrder.nativeOrder());
+
+    this.preAllocationLimit = (preAllocationLimit / pageSize) * pageSize;
 
     int pagesPerArea = (maxChunkSize / pageSize);
     if (pagesPerArea > 1) {
@@ -159,10 +155,8 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
       }
 
       maxPagesPerSingleArea = pagesPerArea;
-      lastPreallocatedArea = new AtomicReference<BufferHolder>();
     } else {
       maxPagesPerSingleArea = 1;
-      lastPreallocatedArea = null;
     }
 
     if (TRACK) {
@@ -176,6 +170,9 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
       trackedBuffers = null;
       trackedReleases = null;
     }
+
+    Orient.instance().registerWeakOrientStartupListener(this);
+    Orient.instance().registerWeakOrientShutdownListener(this);
   }
 
   /**
@@ -239,89 +236,64 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
     }
 
     if (maxPagesPerSingleArea > 1) {
-
       final long currentAllocationPosition = nextAllocationPosition.getAndIncrement();
+
+      //all chucks consumes maxPagesPerSingleArea space with exception of last one
       final int position = (int) (currentAllocationPosition & (maxPagesPerSingleArea - 1));
       final int bufferIndex = (int) (currentAllocationPosition / maxPagesPerSingleArea);
 
-      BufferHolder bfh = null;
-      try {
-        while (true) {
-          // we cannot free chunk of allocated memory so we set place holder first
-          // if operation successful we allocate part of direct memory.
-          bfh = lastPreallocatedArea.get();
-          assert bfh == null || bfh.index <= bufferIndex;
+      //if we hit the end of preallocation buffer we allocate by small chunks
+      if (currentAllocationPosition >= preAllocationLimit) {
+        return trackBuffer(ByteBuffer.allocateDirect(pageSize).order(ByteOrder.nativeOrder()));
+      }
 
-          if (bfh == null) {
-            bfh = new BufferHolder(bufferIndex);
+      //allocation size should be the same for all buffers from chuck with the same index
+      final int allocationSize = (int) Math
+          .min(maxPagesPerSingleArea * pageSize, (preAllocationLimit - bufferIndex * maxPagesPerSingleArea) * pageSize);
 
-            if (lastPreallocatedArea.compareAndSet(null, bfh)) {
-              allocateBuffer(bfh);
-            } else {
-              continue;
-            }
-          } else if (bfh.buffer == null) {
-            // if place holder is not null it means that byte buffer is allocated but not set yet in other thread
-            // so we wait till buffer instance will be shared by other thread
-            try {
-              bfh.latch.await();
-            } catch (InterruptedException e) {
-              throw OException.wrapException(new OInterruptedException("Wait of new preallocated memory area was interrupted"), e);
-            }
-          }
+      // we cannot free chunk of allocated memory so we set place holder first
+      // if operation successful we allocate part of direct memory.
+      BufferHolder bfh = preallocatedAreas.get(bufferIndex);
 
-          if (bfh.index < bufferIndex) {
-            //we have to request page only from buffer with calculated index otherwise we may use memory already allocated
-            //to other page
+      if (bfh == null) {
+        bfh = new BufferHolder();
 
-            final int requestedPages = bfh.requested.get();
-            //wait till all pending memory requests which use this buffer will be fulfilled
-            if (requestedPages < maxPagesPerSingleArea) {
-              try {
-                bfh.filled.await();
-              } catch (InterruptedException e) {
-                throw OException
-                    .wrapException(new OInterruptedException("Wait of new preallocated memory area was interrupted"), e);
-              }
-            }
+        BufferHolder replacedBufferHolder = preallocatedAreas.putIfAbsent(bufferIndex, bfh);
 
-            final BufferHolder bufferHolder = new BufferHolder(bufferIndex);
-            if (lastPreallocatedArea.compareAndSet(bfh, bufferHolder)) {
-              bfh = bufferHolder;
-              allocateBuffer(bfh);
-            } else {
-              assert bufferHolder.index == bufferIndex;
-              continue;
-            }
-          }
-
-          final int rawPosition = position * pageSize;
-          // duplicate buffer to have thread local version of buffer position.
-          final ByteBuffer db = bfh.buffer.duplicate();
-
-          db.position(rawPosition);
-          db.limit(rawPosition + pageSize);
-
-          ByteBuffer slice = db.slice();
-          slice.order(ByteOrder.nativeOrder());
-
-          if (clear) {
-            slice.position(0);
-            slice.put(zeroPage.duplicate());
-          }
-
-          slice.position(0);
-          return trackBuffer(slice);
-        }
-      } finally {
-        //we put this in final block to be sure that indication about processed memory request was for sure reflected
-        //in buffer holder counter which contains amount of memory blocks already processed by given buffer
-        if (bfh != null) {
-          final int completedRequests = bfh.requested.incrementAndGet();
-          if (completedRequests == maxPagesPerSingleArea)
-            bfh.filled.countDown();
+        if (replacedBufferHolder == null) {
+          allocateBuffer(bfh, allocationSize);
+        } else {
+          bfh = replacedBufferHolder;
         }
       }
+
+      if (bfh.buffer == null) {
+        // if place holder is not null it means that byte buffer is allocated but not set yet in other thread
+        // so we wait till buffer instance will be shared by other thread
+        try {
+          bfh.latch.await();
+        } catch (InterruptedException e) {
+          throw OException.wrapException(new OInterruptedException("Wait of new preallocated memory area was interrupted"), e);
+        }
+      }
+
+      final int rawPosition = position * pageSize;
+      // duplicate buffer to have thread local version of buffer position.
+      final ByteBuffer db = bfh.buffer.duplicate();
+
+      db.position(rawPosition);
+      db.limit(rawPosition + pageSize);
+
+      ByteBuffer slice = db.slice();
+      slice.order(ByteOrder.nativeOrder());
+
+      if (clear) {
+        slice.position(0);
+        slice.put(zeroPage.duplicate());
+      }
+
+      slice.position(0);
+      return trackBuffer(slice);
     }
 
     // this should not happen if amount of pages is needed for storage is calculated correctly
@@ -334,8 +306,7 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
    *
    * @param bfh Buffer holder for direct memory buffer to be allocated.
    */
-  private void allocateBuffer(BufferHolder bfh) {
-    final int allocationSize = maxPagesPerSingleArea * pageSize;
+  private void allocateBuffer(BufferHolder bfh, int allocationSize) {
     try {
       bfh.buffer = ByteBuffer.allocateDirect(allocationSize).order(ByteOrder.nativeOrder());
     } finally {
@@ -470,48 +441,117 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
     }
   }
 
+  /**
+   * Logs all known tracking information about the given buffer. {@link OGlobalConfiguration#DIRECT_MEMORY_TRACK_MODE} must be on,
+   * otherwise this method does nothing.
+   *
+   * @param prefix the log message prefix
+   * @param buffer the buffer to print information about
+   */
+  @SuppressWarnings("ThrowableResultOfMethodCallIgnored")
+  public void logTrackedBufferInfo(String prefix, ByteBuffer buffer) {
+    if (TRACK) {
+      synchronized (this) {
+        final TrackedBufferKey trackedBufferKey = new TrackedBufferKey(buffer);
+        final TrackedBufferReference reference = trackedBuffers.get(trackedBufferKey);
+
+        final StringBuilder builder = new StringBuilder();
+        builder.append("DIRECT-TRACK: ").append(prefix).append(String.format(" buffer `%X` ", id(buffer)));
+
+        if (reference == null)
+          builder.append("untracked");
+        else
+          builder.append("allocated from: ").append('\n').append(getStackTraceAsString(reference.stackTrace)).append('\n');
+
+        final Exception release = trackedReleases.get(trackedBufferKey);
+        if (release != null)
+          builder.append("released from: ").append('\n').append(getStackTraceAsString(release)).append('\n');
+
+        OLogManager.instance().error(this, builder.toString());
+      }
+    }
+  }
+
+  @Override
+  public void onStartup() {
+    if (this.zeroPage != null) // already/still started?
+      return;
+
+    this.zeroPage = ByteBuffer.allocateDirect(pageSize).order(ByteOrder.nativeOrder());
+  }
+
+  @Override
+  public void onShutdown() {
+    if (zeroPage == null) // already/still shutdown?
+      return;
+
+    final Set<ByteBuffer> cleaned = Collections.newSetFromMap(new IdentityHashMap<ByteBuffer, Boolean>());
+    try {
+      clean(zeroPage, cleaned);
+      for (ByteBuffer byteBuffer : pool)
+        clean(byteBuffer, cleaned);
+    } catch (Throwable t) {
+      return;
+    }
+
+    this.zeroPage = null;
+
+    if (this.preallocatedAreas != null) {
+      for (BufferHolder bufferHolder : preallocatedAreas.values()) {
+        clean(bufferHolder.buffer, cleaned);
+      }
+      this.preallocatedAreas.clear();
+    }
+
+    nextAllocationPosition.set(0);
+    pool.clear();
+    overflowBufferCount.set(0);
+
+    if (TRACK) {
+      for (TrackedBufferReference reference : trackedReferences)
+        reference.clear();
+      trackedReferences.clear();
+      trackedBuffers.clear();
+      trackedReleases.clear();
+
+      //noinspection StatementWithEmptyBody
+      while (trackedBuffersQueue.poll() != null)
+        ;
+    }
+  }
+
+  private void clean(ByteBuffer buffer, Set<ByteBuffer> cleaned) {
+    final ByteBuffer directByteBufferWithCleaner = findDirectByteBufferWithCleaner(buffer, 16);
+    if (directByteBufferWithCleaner != null && !cleaned.contains(directByteBufferWithCleaner)) {
+      cleaned.add(directByteBufferWithCleaner);
+      ((DirectBuffer) directByteBufferWithCleaner).cleaner().clean();
+      if (TRACK)
+        OLogManager.instance().info(this, "DIRECT-TRACK: cleaned " + directByteBufferWithCleaner);
+    }
+  }
+
+  private static ByteBuffer findDirectByteBufferWithCleaner(ByteBuffer buffer, int depthLimit) {
+    if (depthLimit == 0)
+      return null;
+
+    if (!(buffer instanceof DirectBuffer))
+      return null;
+    final DirectBuffer directBuffer = (DirectBuffer) buffer;
+
+    final Cleaner cleaner = directBuffer.cleaner();
+    if (cleaner != null)
+      return buffer;
+
+    final Object attachment = directBuffer.attachment();
+    if (!(attachment instanceof ByteBuffer))
+      return null;
+
+    return findDirectByteBufferWithCleaner((ByteBuffer) attachment, depthLimit - 1);
+  }
+
   private static final class BufferHolder {
     private volatile ByteBuffer buffer;
     private final CountDownLatch latch = new CountDownLatch(1);
-
-    /**
-     * Latch which is triggered when there is no any unused space in this buffer.
-     */
-    private final CountDownLatch filled = new CountDownLatch(1);
-
-    /**
-     * Amount of pages which were requested from this buffer.
-     * But not buffer size or index of last page in buffer.
-     * <p>
-     * This parameter is used to be sure that if we are going to allocate new buffer
-     * this buffer is served all page requests
-     */
-    private final AtomicInteger requested = new AtomicInteger();
-
-    /**
-     * Logical index of buffer.
-     * <p>
-     * Each buffer may contain only limited number of pages . Amount of pages is specified in
-     * {@link #maxPagesPerSingleArea} parameter.
-     * <p>
-     * Current field is allocation number of this buffer.
-     * Let say we requested 5-th page but buffer may contain only 4 pages.
-     * So first buffer will be created with index 0 and buffer which is needed for 5-th page will be created
-     * with index 1.
-     * <p>
-     * In general index of buffer is result of dividing of page index on number of pages which may be contained by
-     * buffer without reminder.
-     * <p>
-     * This index is used to check that buffer which is currently used to serve memory requests is one which should be used
-     * for page with given index.
-     */
-
-    private final int index;
-
-    public BufferHolder(int index) {
-      this.index = index;
-    }
-
   }
 
   private ByteBuffer trackBuffer(ByteBuffer buffer) {
@@ -589,7 +629,7 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
     return System.identityHashCode(object);
   }
 
-  @SuppressWarnings("AssertWithSideEffects")
+  @SuppressWarnings({ "AssertWithSideEffects", "ConstantConditions" })
   private static boolean logInAssertion() {
     boolean assertionsEnabled = false;
     assert assertionsEnabled = true;
@@ -610,6 +650,12 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
         builder.append(stringWriter.toString());
       }
     }
+  }
+
+  private static String getStackTraceAsString(Throwable throwable) {
+    final StringWriter writer = new StringWriter();
+    throwable.printStackTrace(new PrintWriter(writer));
+    return writer.toString();
   }
 
   private static class TrackedBufferReference extends WeakReference<ByteBuffer> {
@@ -647,6 +693,23 @@ public class OByteBufferPool implements OByteBufferPoolMXBean {
       return buffer != null && buffer == ((TrackedBufferKey) obj).get();
     }
 
+  }
+
+  private static class InstanceHolder {
+    private static final OByteBufferPool INSTANCE;
+
+    static {
+      // page size in bytes
+      final int pageSize = OGlobalConfiguration.DISK_CACHE_PAGE_SIZE.getValueAsInteger() * 1024;
+
+      // Maximum amount of chunk size which should be allocated at once by system
+      final int memoryChunkSize = OGlobalConfiguration.MEMORY_CHUNK_SIZE.getValueAsInteger();
+
+      final long diskCacheSize = OGlobalConfiguration.DISK_CACHE_SIZE.getValueAsInteger() * 1024L * 1024L;
+
+      // instance of byte buffer which should be used by all storage components
+      INSTANCE = new OByteBufferPool(pageSize, memoryChunkSize, diskCacheSize);
+    }
   }
 
 }

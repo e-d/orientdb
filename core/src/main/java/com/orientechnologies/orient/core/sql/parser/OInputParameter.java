@@ -3,6 +3,7 @@
 package com.orientechnologies.orient.core.sql.parser;
 
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.serialization.OBase64Utils;
 
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
@@ -24,7 +25,9 @@ public class OInputParameter extends SimpleNode {
     super(p, id);
   }
 
-  /** Accept the visitor. **/
+  /**
+   * Accept the visitor.
+   **/
   public Object jjtAccept(OrientSqlVisitor visitor, Object data) {
     return visitor.visit(this, data);
   }
@@ -37,7 +40,7 @@ public class OInputParameter extends SimpleNode {
     if (value == null) {
       return null;
     }
-    if(value instanceof Boolean){
+    if (value instanceof Boolean) {
       return value;
     }
     if (value instanceof Integer) {
@@ -67,6 +70,19 @@ public class OInputParameter extends SimpleNode {
       }
       return coll;
     }
+    if (value instanceof Map) {
+      OJson json = new OJson(-1);
+      json.items = new ArrayList<OJsonItem>();
+      for (Object entry : ((Map) value).entrySet()) {
+        OJsonItem item = new OJsonItem();
+        item.leftString = "" + ((Map.Entry) entry).getKey();
+        OExpression exp = new OExpression(-1);
+        exp.value = toParsedTree(((Map.Entry) entry).getValue());
+        item.right = exp;
+        json.items.add(item);
+      }
+      return json;
+    }
     if (value instanceof OIdentifiable) {
       // TODO if invalid build a JSON
       ORid rid = new ORid(-1);
@@ -95,6 +111,24 @@ public class OInputParameter extends SimpleNode {
       dateFormatExpr.singleQuotes = true;
       dateFormatExpr.doubleQuotes = false;
       dateFormatExpr.value = dateFormatString;
+      function.getParams().add(dateFormatExpr);
+      return function;
+    }
+    if (value instanceof byte[]) {
+      OFunctionCall function = new OFunctionCall(-1);
+      function.name = new OIdentifier(-1);
+      function.name.value = "decode";
+
+      OExpression valueExpr = new OExpression(-1);
+      valueExpr.singleQuotes = true;
+      valueExpr.doubleQuotes = false;
+      valueExpr.value = OBase64Utils.encodeBytes((byte[]) value);
+      function.getParams().add(valueExpr);
+
+      OExpression dateFormatExpr = new OExpression(-1);
+      dateFormatExpr.singleQuotes = true;
+      dateFormatExpr.doubleQuotes = false;
+      dateFormatExpr.value = "base64";
       function.getParams().add(dateFormatExpr);
       return function;
     }

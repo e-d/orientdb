@@ -47,6 +47,26 @@ public class OServerMain {
     return instance.server;
   }
 
+//  public static void main(final String[] args) throws Exception {
+//    // STARTS ORIENTDB IN A NON DAEMON THREAD TO PREVENT EXIT
+//    final Thread t = new Thread() {
+//      @Override
+//      public void run() {
+//        try {
+//          instance = OServerMain.create();
+//          instance.startup().activate();
+//          instance.waitForShutdown();
+//        } catch (Exception e) {
+//          e.printStackTrace();
+//        }
+//      }
+//    };
+//
+//    t.setDaemon(false);
+//
+//    t.start();
+//    t.join();
+//  }
   public static void main(final String[] args) {
     try {
       // To enable use of OrientDB by Apache Commons Daemon, we need to check arguments.

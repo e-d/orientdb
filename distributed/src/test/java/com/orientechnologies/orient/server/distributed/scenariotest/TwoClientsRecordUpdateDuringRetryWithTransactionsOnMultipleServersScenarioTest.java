@@ -47,7 +47,6 @@ import static org.junit.Assert.assertEquals;
  * - server2 can now successfully update the record on server1
  */
 
-@Ignore
 // TODO Temporary Ignored
 public class TwoClientsRecordUpdateDuringRetryWithTransactionsOnMultipleServersScenarioTest extends AbstractScenarioTest {
 
@@ -66,13 +65,13 @@ public class TwoClientsRecordUpdateDuringRetryWithTransactionsOnMultipleServersS
   };
 
   @Test
+  @Ignore
   public void test() throws Exception {
     OGlobalConfiguration.DISTRIBUTED_CONCURRENT_TX_AUTORETRY_DELAY.setValue(new Integer(2000));
     OGlobalConfiguration.DISTRIBUTED_CONCURRENT_TX_MAX_AUTORETRY.setValue(new Integer(1));
     maxRetries = 10;
     init(2);
     prepare(false);
-    executeWritesOnServers.addAll(serverInstance);
     execute();
   }
 

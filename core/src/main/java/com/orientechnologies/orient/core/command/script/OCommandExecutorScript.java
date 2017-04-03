@@ -481,7 +481,10 @@ public class OCommandExecutorScript extends OCommandExecutorAbstract implements 
   }
 
   private Object executeCommand(final String lastCommand, final ODatabaseDocument db) {
-    return db.command(new OCommandSQL(lastCommand).setContext(getContext())).execute(toMap(parameters));
+    final OCommandSQL command = new OCommandSQL(lastCommand);
+    Object result = db.command(command.setContext(getContext())).execute(toMap(parameters));
+    request.setFetchPlan(command.getFetchPlan());
+    return result;
   }
 
   private Object toMap(Object parameters) {
@@ -555,7 +558,7 @@ public class OCommandExecutorScript extends OCommandExecutorAbstract implements 
       lastResult = new OContextVariableResolver(context).parse(OIOUtils.getStringContent(iValue));
       checkIsRecordResultSet(lastResult);
     } else if (iValue.startsWith("(") && iValue.endsWith(")"))
-      lastResult = executeCommand(iValue, db);
+      lastResult = executeCommand(iValue.substring(1, iValue.length() - 1), db);
     else {
       lastResult = new OSQLPredicate(iValue).evaluate(context);
 

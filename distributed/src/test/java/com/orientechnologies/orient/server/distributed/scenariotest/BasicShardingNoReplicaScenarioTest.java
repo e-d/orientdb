@@ -21,7 +21,7 @@ import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.sql.OCommandSQL;
-import com.orientechnologies.orient.server.distributed.ODistributedConfiguration;
+import com.orientechnologies.orient.server.distributed.OModifiableDistributedConfiguration;
 import com.orientechnologies.orient.server.hazelcast.OHazelcastPlugin;
 import com.tinkerpop.blueprints.Vertex;
 import com.tinkerpop.blueprints.impls.orient.OrientGraphFactory;
@@ -36,17 +36,12 @@ import java.util.List;
 import static org.junit.Assert.*;
 
 /**
- * It checks the consistency in the cluster with the following scenario:
- * - 3 server (europe, usa, asia)
- * - 3 shards, one for each server (client_europe, client_usa, client_asia)
- * - writes on each node (5 threads for each running server write 100 records)
- * - check availability no-replica (you can retry records of all the shards)
- * - shutdown server3
- * - check availability no-replica (you can retry only records in shard1 and shard2)
- * - restart server3
- * - check availability no-replica (you can retry records of all the shards)
- * - this test checks also the full restore of database that doesn't overwrite the client_asia
- *   cluster because owned only by asia server
+ * It checks the consistency in the cluster with the following scenario: - 3 server (europe, usa, asia) - 3 shards, one for each
+ * server (client_europe, client_usa, client_asia) - writes on each node (5 threads for each running server write 100 records) -
+ * check availability no-replica (you can retry records of all the shards) - shutdown server3 - check availability no-replica (you
+ * can retry only records in shard1 and shard2) - restart server3 - check availability no-replica (you can retry records of all the
+ * shards) - this test checks also the full restore of database that doesn't overwrite the client_asia cluster because owned only by
+ * asia server
  *
  * @author Gabriele Ponzi
  * @email <gabriele.ponzi--at--gmail.com>
@@ -58,7 +53,6 @@ public class BasicShardingNoReplicaScenarioTest extends AbstractShardingScenario
   public void test() throws Exception {
     init(SERVERS);
     prepare(false);
-    super.executeWritesOnServers.addAll(super.serverInstance);
     execute();
   }
 
@@ -67,12 +61,9 @@ public class BasicShardingNoReplicaScenarioTest extends AbstractShardingScenario
 
     OHazelcastPlugin manager1 = (OHazelcastPlugin) serverInstance.get(0).getServerInstance().getDistributedManager();
 
-    ODistributedConfiguration databaseConfiguration = manager1.getDatabaseConfiguration(this.getDatabaseName());
+    final OModifiableDistributedConfiguration databaseConfiguration = manager1.getDatabaseConfiguration(this.getDatabaseName())
+        .modify();
     ODocument cfg = databaseConfiguration.getDocument();
-    cfg.field("autoDeploy", false);
-    cfg.field("version", (Integer) cfg.field("version") + 1);
-
-    manager1.updateCachedDatabaseConfiguration(this.getDatabaseName(), cfg, true, true);
 
     OrientGraphFactory localFactory = new OrientGraphFactory("plocal:target/server0/databases/" + getDatabaseName());
     OrientGraphNoTx graphNoTx = null;
@@ -81,14 +72,14 @@ public class BasicShardingNoReplicaScenarioTest extends AbstractShardingScenario
 
       final OrientVertexType clientType = graphNoTx.createVertexType("Client", 1);
 
-      ODistributedConfiguration dCfg = new ODistributedConfiguration(cfg);
+      OModifiableDistributedConfiguration dCfg = new OModifiableDistributedConfiguration(cfg);
       for (int i = 0; i < serverInstance.size(); ++i) {
         final String serverName = serverInstance.get(i).getServerInstance().getDistributedManager().getLocalNodeName();
         clientType.addCluster("client_" + serverName);
 
         dCfg.setServerOwner("client_" + serverName, serverName);
       }
-      manager1.updateCachedDatabaseConfiguration(this.getDatabaseName(), dCfg.getDocument(), true, true);
+      manager1.updateCachedDatabaseConfiguration(this.getDatabaseName(), dCfg, true);
 
       final OrientVertexType.OrientVertexProperty prop = clientType.createProperty("name", OType.STRING);
       prop.createIndex(OClass.INDEX_TYPE.NOTUNIQUE);
@@ -100,22 +91,22 @@ public class BasicShardingNoReplicaScenarioTest extends AbstractShardingScenario
       graphNoTx.getRawGraph().close();
 
       // writes on the three clusters
-      executeMultipleWritesOnShards(executeWritesOnServers, "plocal");
+      executeMultipleWritesOnShards(executeTestsOnServers, "plocal");
 
       // check consistency (no-replica)
-      checkAvailabilityOnShardsNoReplica(serverInstance, executeWritesOnServers);
+      checkAvailabilityOnShardsNoReplica(serverInstance, executeTestsOnServers);
 
       // network fault on server3
       System.out.println("Shutdown on server3.\n");
       simulateServerFault(serverInstance.get(2), "shutdown");
       assertFalse(serverInstance.get(2).isActive());
 
-      waitForDatabaseIsOffline(executeWritesOnServers.get(2).getServerInstance().getDistributedManager().getLocalNodeName(),
+      waitForDatabaseIsOffline(executeTestsOnServers.get(2).getServerInstance().getDistributedManager().getLocalNodeName(),
           getDatabaseName(), 10000);
 
       // check consistency (no-replica)
-      executeWritesOnServers.remove(2);
-      checkAvailabilityOnShardsNoReplica(executeWritesOnServers, executeWritesOnServers);
+      executeTestsOnServers.remove(2);
+      checkAvailabilityOnShardsNoReplica(executeTestsOnServers, executeTestsOnServers);
 
       // this query doesn't return any result
       try {
@@ -142,7 +133,7 @@ public class BasicShardingNoReplicaScenarioTest extends AbstractShardingScenario
       System.out.println("Server 3 restarted.");
       assertTrue(serverInstance.get(2).isActive());
 
-      waitForDatabaseIsOnline(serverInstance.get(2).getServerInstance().getDistributedManager().getLocalNodeName(),
+      waitForDatabaseIsOnline(0, serverInstance.get(2).getServerInstance().getDistributedManager().getLocalNodeName(),
           getDatabaseName(), 10000);
 
       // checking server3 status by querying a record inserted on it
@@ -166,8 +157,8 @@ public class BasicShardingNoReplicaScenarioTest extends AbstractShardingScenario
       }
 
       // check consistency (no-replica)
-      executeWritesOnServers.add(serverInstance.get(2));
-      checkAvailabilityOnShardsNoReplica(serverInstance, executeWritesOnServers);
+      executeTestsOnServers.add(serverInstance.get(2));
+      checkAvailabilityOnShardsNoReplica(serverInstance, executeTestsOnServers);
 
     } catch (Exception e) {
       e.printStackTrace();

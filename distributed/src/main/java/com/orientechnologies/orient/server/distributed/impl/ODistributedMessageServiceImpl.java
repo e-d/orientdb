@@ -24,10 +24,8 @@ import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.record.impl.ODocument;
-import com.orientechnologies.orient.server.distributed.ODistributedMessageService;
-import com.orientechnologies.orient.server.distributed.ODistributedResponse;
-import com.orientechnologies.orient.server.distributed.ODistributedResponseManager;
-import com.orientechnologies.orient.server.distributed.ODistributedServerLog;
+import com.orientechnologies.orient.server.OSystemDatabase;
+import com.orientechnologies.orient.server.distributed.*;
 import com.orientechnologies.orient.server.distributed.ODistributedServerLog.DIRECTION;
 import com.orientechnologies.orient.server.hazelcast.OHazelcastPlugin;
 
@@ -39,16 +37,15 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Hazelcast implementation of distributed peer. There is one instance per database. Each node creates own instance to talk with
  * each others.
- * 
+ *
  * @author Luca Garulli (l.garulli--at--orientechnologies.com)
- * 
  */
 public class ODistributedMessageServiceImpl implements ODistributedMessageService {
 
   private final OHazelcastPlugin                                     manager;
   private final ConcurrentHashMap<Long, ODistributedResponseManager> responsesByRequestIds;
   private final TimerTask                                            asynchMessageManager;
-  private Map<String, ODistributedDatabaseImpl>                      databases           = new ConcurrentHashMap<String, ODistributedDatabaseImpl>();
+  final ConcurrentHashMap<String, ODistributedDatabaseImpl>          databases           = new ConcurrentHashMap<String, ODistributedDatabaseImpl>();
   private Thread                                                     responseThread;
   private long[]                                                     responseTimeMetrics = new long[10];
   private volatile boolean                                           running             = true;
@@ -89,8 +86,14 @@ public class ODistributedMessageServiceImpl implements ODistributedMessageServic
     }
 
     // SHUTDOWN ALL DATABASES
-    for (Entry<String, ODistributedDatabaseImpl> m : databases.entrySet())
+    for (Entry<String, ODistributedDatabaseImpl> m : databases.entrySet()) {
+      try {
+        manager.setDatabaseStatus(manager.getLocalNodeName(), m.getKey(), ODistributedServerManager.DB_STATUS.OFFLINE);
+      } catch (Throwable t) {
+        // IGNORE IT
+      }
       m.getValue().shutdown();
+    }
     databases.clear();
 
     asynchMessageManager.cancel();
@@ -122,13 +125,24 @@ public class ODistributedMessageServiceImpl implements ODistributedMessageServic
     return total > 0 ? total / involved : 0;
   }
 
-  public ODistributedDatabaseImpl registerDatabase(final String iDatabaseName) {
-    final ODistributedDatabaseImpl db = new ODistributedDatabaseImpl(manager, this, iDatabaseName);
-    databases.put(iDatabaseName, db);
-    return db;
+  /**
+   * Creates a distributed database instance if not defined yet.
+   */
+  public ODistributedDatabaseImpl registerDatabase(final String iDatabaseName, ODistributedConfiguration cfg) {
+    final ODistributedDatabaseImpl ddb = databases.get(iDatabaseName);
+    if (ddb != null)
+      return ddb;
+
+    return new ODistributedDatabaseImpl(manager, this, iDatabaseName, cfg);
   }
 
   public ODistributedDatabaseImpl unregisterDatabase(final String iDatabaseName) {
+    try {
+      manager.setDatabaseStatus(manager.getLocalNodeName(), iDatabaseName, ODistributedServerManager.DB_STATUS.OFFLINE);
+    } catch (Throwable t) {
+      // IGNORE IT
+    }
+
     final ODistributedDatabaseImpl db = databases.remove(iDatabaseName);
     if (db != null) {
       db.shutdown();
@@ -137,8 +151,19 @@ public class ODistributedMessageServiceImpl implements ODistributedMessageServic
   }
 
   @Override
-  public Set<String> getDatabases() {
-    return databases.keySet();
+  public Set<String> getDatabases() {    
+    // We assign the ConcurrentHashMap (databases) to the Map interface for this reason:
+    // ConcurrentHashMap.keySet() in Java 8 returns a ConcurrentHashMap.KeySetView.
+    // ConcurrentHashMap.keySet() in Java 7 returns a Set.
+    // If this code is compiled with Java 8 yet is run on Java 7, you'll receive a NoSuchMethodError:
+    // java.util.concurrent.ConcurrentHashMap.keySet()Ljava/util/concurrent/ConcurrentHashMap$KeySetView.
+    // By assigning the ConcurrentHashMap variable to a Map, the call to keySet() will return a Set
+    // and not the Java 8 type, KeySetView.
+    Map<String, ODistributedDatabaseImpl> map = databases;
+    
+    final Set<String> result = new HashSet<String>(map.keySet());
+    result.remove(OSystemDatabase.SYSTEM_DB_NAME);
+    return result;
   }
 
   /**
@@ -218,7 +243,7 @@ public class ODistributedMessageServiceImpl implements ODistributedMessageServic
   }
 
   protected void purgePendingMessages() {
-    final long now = System.currentTimeMillis();
+    final long now = System.nanoTime();
 
     final long timeout = OGlobalConfiguration.DISTRIBUTED_ASYNCH_RESPONSES_TIMEOUT.getValueAsLong();
 
@@ -227,7 +252,7 @@ public class ODistributedMessageServiceImpl implements ODistributedMessageServic
 
       final ODistributedResponseManager resp = item.getValue();
 
-      final long timeElapsed = now - resp.getSentOn();
+      final long timeElapsed = (now - resp.getSentOn()) / 1000000;
 
       if (timeElapsed > timeout) {
         // EXPIRED REQUEST, FREE IT!

@@ -19,6 +19,7 @@
  */
 package com.orientechnologies.orient.enterprise.channel.binary;
 
+import com.orientechnologies.common.io.OIOException;
 import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.id.ORecordId;
@@ -56,7 +57,7 @@ public class OChannelBinaryProtocol {
   public static final byte REQUEST_DATASEGMENT_ADD  = 20;                 // NOT USED ANYMORE
   public static final byte REQUEST_DATASEGMENT_DROP = 21;                 // NOT USED ANYMORE
 
-  public static final byte REQUEST_INCREMENTAL_BACKUP  = 27;                 // since 2.2
+  public static final byte REQUEST_INCREMENTAL_BACKUP = 27;                 // since 2.2
 
   public static final byte REQUEST_RECORD_METADATA  = 29;                 // since 1.4.0
   public static final byte REQUEST_RECORD_LOAD      = 30;
@@ -89,7 +90,9 @@ public class OChannelBinaryProtocol {
   public static final byte REQUEST_PUSH_LIVE_QUERY     = 81;                 // SINCE 2.1
 
   // DISTRIBUTED
+  @Deprecated
   public static final byte REQUEST_DB_COPY     = 90;                 // SINCE 1.0rc8
+  @Deprecated
   public static final byte REQUEST_REPLICATION = 91;                 // SINCE 1.0
   public static final byte REQUEST_CLUSTER     = 92;                 // SINCE 1.0
   public static final byte REQUEST_DB_TRANSFER = 93;                 // NOT USED ANYMORE
@@ -165,6 +168,15 @@ public class OChannelBinaryProtocol {
       ORecordInternal.fill(record, rid, version, content, false);
 
       return record;
+    }
+  }
+
+  public static void checkRequestTypeRange(final OChannelBinary channel, final int reqType) {
+    if (reqType < REQUEST_SHUTDOWN || reqType > DISTRIBUTED_RESPONSE) {
+      // DIRTY DATA: FORCE CLOSING THE CHANNEL
+      channel.close();
+
+      throw new OIOException("Invalid request type received on socket " + channel);
     }
   }
 }

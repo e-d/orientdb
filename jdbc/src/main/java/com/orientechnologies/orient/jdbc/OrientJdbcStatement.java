@@ -50,6 +50,7 @@ public class OrientJdbcStatement implements Statement {
 
   // protected OCommandSQL query;
   protected OCommandRequest     query;
+  protected String              sql;
   protected List<ODocument>     documents;
   protected boolean             closed;
   protected Object              rawResult;
@@ -95,15 +96,19 @@ public class OrientJdbcStatement implements Statement {
   }
 
   @Override
-  public boolean execute(final String sql) throws SQLException {
-    if ("".equals(sql))
+  public boolean execute(final String sqlCommand) throws SQLException {
+
+//    System.out.println("sqlCommand = " + sqlCommand);
+    if ("".equals(sqlCommand))
       return false;
+
+    sql = mayCleanForSpark(sqlCommand);
 
     if (sql.equalsIgnoreCase("select 1")) {
       documents = new ArrayList<ODocument>(1);
       documents.add(new ODocument().field("1", 1));
     } else {
-      query = new OCommandSQL(mayCleanForSpark(sql));
+      query = new OCommandSQL(sql);
       try {
         rawResult = executeCommand(query);
         if (rawResult instanceof List<?>) {
@@ -123,6 +128,8 @@ public class OrientJdbcStatement implements Statement {
       }
     }
     resultSet = new OrientJdbcResultSet(this, documents, resultSetType, resultSetConcurrency, resultSetHoldability);
+
+
     return true;
 
   }
@@ -151,6 +158,7 @@ public class OrientJdbcStatement implements Statement {
   protected <RET> RET executeCommand(OCommandRequest query) throws SQLException {
 
     try {
+      database.activateOnCurrentThread();
       return database.command(query).execute();
     } catch (OQueryParsingException e) {
       throw new SQLSyntaxErrorException("Error while parsing command", e);

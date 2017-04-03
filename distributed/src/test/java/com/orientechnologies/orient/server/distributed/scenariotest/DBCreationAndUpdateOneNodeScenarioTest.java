@@ -21,7 +21,6 @@ import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.List;
@@ -37,17 +36,15 @@ import static org.junit.Assert.*;
  * - check consistency: db with all the records are consistent
  *
  * @author Gabriele Ponzi
- * @email  <gabriele.ponzi--at--gmail.com>
+ * @email <gabriele.ponzi--at--gmail.com>
  */
 
 public class DBCreationAndUpdateOneNodeScenarioTest extends AbstractScenarioTest {
 
-  @Ignore
   @Test
   public void test() throws Exception {
     init(SERVERS);
     prepare(false);
-    super.executeWritesOnServers.addAll(super.serverInstance);
     execute();
   }
 
@@ -65,34 +62,38 @@ public class DBCreationAndUpdateOneNodeScenarioTest extends AbstractScenarioTest
 
     // checking the db was created both on server2 and server3
     ODatabaseRecordThreadLocal.INSTANCE.set(null);
+    ODatabaseDocumentTx dbServer2 = poolFactory.get(url2, "admin", "admin").acquire();
     try {
-      ODatabaseDocumentTx dbServer2 = poolFactory.get(url2,"admin","admin").acquire();
       assertNotNull(dbServer2);
       List<ODocument> result = dbServer2.query(new OSQLSynchQuery<OIdentifiable>("select from Person"));
       assertEquals(0, result.size());
     } catch (Exception e) {
       e.printStackTrace();
       fail();
+    } finally {
+      dbServer2.close();
     }
 
     ODatabaseRecordThreadLocal.INSTANCE.set(null);
+    ODatabaseDocumentTx dbServer3 = poolFactory.get(url3, "admin", "admin").acquire();
     try {
-      ODatabaseDocumentTx dbServer3 = poolFactory.get(url3,"admin","admin").acquire();
       assertNotNull(dbServer3);
       List<ODocument> result = dbServer3.query(new OSQLSynchQuery<OIdentifiable>("select from Person"));
       assertEquals(0, result.size());
     } catch (Exception e) {
       e.printStackTrace();
       fail();
+    } finally {
+      dbServer3.close();
     }
 
     // executing writes on server1
-    executeWritesOnServers.remove(2);
-    executeWritesOnServers.remove(1);
-    executeMultipleWrites(super.executeWritesOnServers, "plocal");
+    executeTestsOnServers.remove(2);
+    executeTestsOnServers.remove(1);
+    executeMultipleWrites(super.executeTestsOnServers, "plocal");
 
     // check consistency
-    checkWritesAboveCluster(serverInstance, executeWritesOnServers);
+    checkWritesAboveCluster(serverInstance, executeTestsOnServers);
   }
 
   @Override

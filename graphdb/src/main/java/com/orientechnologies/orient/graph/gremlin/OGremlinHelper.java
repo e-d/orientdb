@@ -29,6 +29,7 @@ import com.orientechnologies.orient.core.exception.OCommandExecutionException;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.tinkerpop.blueprints.impls.orient.OrientBaseGraph;
 import com.tinkerpop.blueprints.impls.orient.OrientGraph;
+import com.tinkerpop.blueprints.impls.orient.OrientGraphFactory;
 import com.tinkerpop.gremlin.groovy.jsr223.GremlinGroovyScriptEngine;
 import com.tinkerpop.gremlin.groovy.jsr223.GremlinGroovyScriptEngineFactory;
 import com.tinkerpop.gremlin.java.GremlinPipeline;
@@ -95,6 +96,9 @@ public class OGremlinHelper {
           if (!iBeforeExecution.call(engine, graph))
             return null;
 
+        if(iText==null){
+          return null;
+        }
         final Object scriptResult = engine.eval(iText);
 
         if (iAfterExecution != null)
@@ -331,7 +335,7 @@ public class OGremlinHelper {
   }
 
   public OrientGraph acquireGraph(final ODatabaseDocumentTx database) {
-    return new OrientGraph(database);
+    return (OrientGraph) OrientGraphFactory.getTxGraphImplFactory().getGraph(database);
   }
 
   public void releaseGraph(final OrientBaseGraph graph) {

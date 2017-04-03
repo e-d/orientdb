@@ -20,6 +20,7 @@
 
 package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 
+import com.orientechnologies.common.concur.executors.SubScheduledExecutorService;
 import com.orientechnologies.common.concur.lock.OInterruptedException;
 import com.orientechnologies.common.io.OFileUtils;
 import com.orientechnologies.common.log.OLogManager;
@@ -27,6 +28,7 @@ import com.orientechnologies.common.serialization.types.OIntegerSerializer;
 import com.orientechnologies.common.serialization.types.OLongSerializer;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.exception.OStorageException;
+import com.orientechnologies.orient.core.storage.OStorageAbstract;
 import com.orientechnologies.orient.core.storage.impl.local.OFullCheckpointRequestListener;
 import com.orientechnologies.orient.core.storage.impl.local.OLowDiskSpaceInformation;
 import com.orientechnologies.orient.core.storage.impl.local.OLowDiskSpaceListener;
@@ -37,8 +39,13 @@ import com.orientechnologies.orient.core.storage.impl.local.statistic.OSessionSt
 
 import java.io.*;
 import java.lang.ref.WeakReference;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.zip.CRC32;
 
@@ -75,7 +82,9 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
   private          File               masterRecordFile;
   private          OLogSequenceNumber firstMasterRecord;
   private          OLogSequenceNumber secondMasterRecord;
+
   private volatile OLogSequenceNumber flushedLsn;
+
   private volatile OLogSequenceNumber preventCutTill;
 
   private volatile long cacheOverflowCount = 0;
@@ -86,6 +95,8 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
   private final Set<OOperationUnitId>                               activeOperations        = new HashSet<OOperationUnitId>();
   private final List<WeakReference<OLowDiskSpaceListener>>          lowDiskSpaceListeners   = new CopyOnWriteArrayList<WeakReference<OLowDiskSpaceListener>>();
   private final List<WeakReference<OFullCheckpointRequestListener>> fullCheckpointListeners = new CopyOnWriteArrayList<WeakReference<OFullCheckpointRequestListener>>();
+
+  private final ByteBuffer fileDataBuffer = ByteBuffer.allocateDirect(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
 
   private static class SimpleFileNameFilter implements java.io.FilenameFilter {
     private final String storageName;
@@ -101,6 +112,28 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
       return validateSimpleName(name, storageName, locale);
     }
   }
+
+  private final ScheduledThreadPoolExecutor autoFileCloser = new ScheduledThreadPoolExecutor(1, new ThreadFactory() {
+    @SuppressWarnings("NullableProblems")
+    @Override
+    public Thread newThread(Runnable r) {
+      final Thread thread = new Thread(OStorageAbstract.storageThreadGroup, r);
+      thread.setDaemon(true);
+      thread.setName("WAL Closer Task (" + getStorage().getName() + ")");
+      return thread;
+    }
+  });
+
+  private final ScheduledThreadPoolExecutor commitExecutor = new ScheduledThreadPoolExecutor(1, new ThreadFactory() {
+    @SuppressWarnings("NullableProblems")
+    @Override
+    public Thread newThread(Runnable r) {
+      final Thread thread = new Thread(OStorageAbstract.storageThreadGroup, r);
+      thread.setDaemon(true);
+      thread.setName("OrientDB WAL Flush Task (" + getStorage().getName() + ")");
+      return thread;
+    }
+  });
 
   private static class FilenameFilter implements java.io.FilenameFilter {
     private final String storageName;
@@ -161,7 +194,8 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
   }
 
   /**
-   * @param fileTTL If file of {@link OLogSegment} will not be accessed inside of this interval (in seconds) it will be closed by timer.
+   * @param fileTTL If file of {@link OLogSegment} will not be accessed inside of this interval (in seconds) it will be closed by
+   *                timer.
    */
   public ODiskWriteAheadLog(int maxPagesCacheSize, int commitDelay, long maxSegmentSize, final String walPath,
       boolean filterWALFiles, final OLocalPaginatedStorage storage, int fileTTL) throws IOException {
@@ -188,8 +222,10 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
 
       if (walFiles.length == 0) {
         OLogSegment logSegment = new OLogSegment(this, new File(this.walLocation, getSegmentName(0)), fileTTL, maxPagesCacheSize,
-            performanceStatisticManager);
-        logSegment.init();
+            performanceStatisticManager, new SubScheduledExecutorService(autoFileCloser),
+            new SubScheduledExecutorService(commitExecutor));
+
+        logSegment.init(fileDataBuffer);
         logSegment.startFlush();
         logSegments.add(logSegment);
 
@@ -201,8 +237,9 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
         logSize = 0;
 
         for (File walFile : walFiles) {
-          OLogSegment logSegment = new OLogSegment(this, walFile, fileTTL, maxPagesCacheSize, performanceStatisticManager);
-          logSegment.init();
+          OLogSegment logSegment = new OLogSegment(this, walFile, fileTTL, maxPagesCacheSize, performanceStatisticManager,
+              new SubScheduledExecutorService(autoFileCloser), new SubScheduledExecutorService(commitExecutor));
+          logSegment.init(fileDataBuffer);
 
           logSegments.add(logSegment);
           logSize += logSegment.filledUpTo();
@@ -437,7 +474,9 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
    *
    * @param record
    * @param recordContent
+   *
    * @return
+   *
    * @throws IOException
    */
   private OLogSequenceNumber internalLog(OWALRecord record, byte[] recordContent) throws IOException {
@@ -487,8 +526,9 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
           last.stopFlush(true);
 
           last = new OLogSegment(this, new File(walLocation, getSegmentName(last.getOrder() + 1)), fileTTL, maxPagesCacheSize,
-              performanceStatisticManager);
-          last.init();
+              performanceStatisticManager, new SubScheduledExecutorService(autoFileCloser),
+              new SubScheduledExecutorService(commitExecutor));
+          last.init(fileDataBuffer);
           last.startFlush();
 
           logSegments.add(last);
@@ -535,8 +575,9 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
       }
 
       last = new OLogSegment(this, new File(walLocation, getSegmentName(lsn.getSegment() + 1)), fileTTL, maxPagesCacheSize,
-          performanceStatisticManager);
-      last.init();
+          performanceStatisticManager, new SubScheduledExecutorService(autoFileCloser),
+          new SubScheduledExecutorService(commitExecutor));
+      last.init(fileDataBuffer);
       last.startFlush();
 
       logSegments.add(last);
@@ -561,8 +602,9 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
       last.stopFlush(true);
 
       last = new OLogSegment(this, new File(walLocation, getSegmentName(last.getOrder() + 1)), fileTTL, maxPagesCacheSize,
-          performanceStatisticManager);
-      last.init();
+          performanceStatisticManager, new SubScheduledExecutorService(autoFileCloser),
+          new SubScheduledExecutorService(commitExecutor));
+      last.init(fileDataBuffer);
       last.startFlush();
 
       logSegments.add(last);
@@ -667,6 +709,30 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
       for (OLogSegment logSegment : logSegments)
         logSegment.close(flush);
 
+      if (!commitExecutor.isShutdown()) {
+        commitExecutor.shutdown();
+        try {
+          if (!commitExecutor
+              .awaitTermination(OGlobalConfiguration.WAL_SHUTDOWN_TIMEOUT.getValueAsInteger(), TimeUnit.MILLISECONDS))
+            throw new OStorageException("WAL flush task for '" + getStorage().getName() + "' storage cannot be stopped");
+
+        } catch (InterruptedException e) {
+          OLogManager.instance().error(this, "Cannot shutdown background WAL commit thread");
+        }
+      }
+
+      if (!autoFileCloser.isShutdown()) {
+        autoFileCloser.shutdown();
+        try {
+          if (!autoFileCloser
+              .awaitTermination(OGlobalConfiguration.WAL_SHUTDOWN_TIMEOUT.getValueAsInteger(), TimeUnit.MILLISECONDS))
+            throw new OStorageException("WAL file auto close tasks '" + getStorage().getName() + "' storage cannot be stopped");
+
+        } catch (InterruptedException e) {
+          OLogManager.instance().error(this, "Shutdown of file auto close tasks was interrupted");
+        }
+      }
+
       masterRecordLSNHolder.close();
     } finally {
       syncObject.unlock();
@@ -712,7 +778,7 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
         return null;
 
       OLogSegment logSegment = logSegments.get(index);
-      byte[] recordEntry = logSegment.readRecord(lsn);
+      byte[] recordEntry = logSegment.readRecord(lsn, fileDataBuffer);
       if (recordEntry == null)
         return null;
 
@@ -738,7 +804,7 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
         return null;
 
       OLogSegment logSegment = logSegments.get(index);
-      OLogSequenceNumber nextLSN = logSegment.getNextLSN(lsn);
+      OLogSequenceNumber nextLSN = logSegment.getNextLSN(lsn, fileDataBuffer);
 
       if (nextLSN == null) {
         index++;
@@ -932,8 +998,13 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
     this.flushedLsn = flushedLsn;
   }
 
+
   public void checkFreeSpace() {
     final long freeSpace = walLocation.getFreeSpace();
+    //system has unlimited amount of free space
+    if (freeSpace < 0)
+      return;
+
     if (freeSpace < freeSpaceLimit) {
       for (WeakReference<OLowDiskSpaceListener> listenerWeakReference : lowDiskSpaceListeners) {
         final OLowDiskSpaceListener lowDiskSpaceListener = listenerWeakReference.get();

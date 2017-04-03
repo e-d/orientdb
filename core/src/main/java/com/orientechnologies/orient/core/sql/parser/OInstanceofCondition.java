@@ -4,12 +4,16 @@ package com.orientechnologies.orient.core.sql.parser;
 
 import com.orientechnologies.orient.core.command.OCommandContext;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.metadata.schema.OClass;
+import com.orientechnologies.orient.core.record.ORecord;
+import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.serialization.serializer.OStringSerializerHelper;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-public class OInstanceofCondition extends OBooleanExpression {
+public class OInstanceofCondition extends OBooleanExpression{
 
   protected OExpression left;
   protected OIdentifier right;
@@ -23,14 +27,42 @@ public class OInstanceofCondition extends OBooleanExpression {
     super(p, id);
   }
 
-  /** Accept the visitor. **/
+  /**
+   * Accept the visitor.
+   **/
   public Object jjtAccept(OrientSqlVisitor visitor, Object data) {
     return visitor.visit(this, data);
   }
 
-  @Override
-  public boolean evaluate(OIdentifiable currentRecord, OCommandContext ctx) {
+  @Override public boolean evaluate(OIdentifiable currentRecord, OCommandContext ctx) {
+    if (currentRecord == null) {
+      return false;
+    }
+    ORecord record = currentRecord.getRecord();
+    if (record == null) {
+      return false;
+    }
+    if (!(record instanceof ODocument)) {
+      return false;
+    }
+    ODocument doc = (ODocument) record;
+    OClass clazz = doc.getSchemaClass();
+    if (clazz == null) {
+      return false;
+    }
+    if (right != null) {
+      return clazz.isSubClassOf(right.getStringValue());
+    } else if (rightString != null) {
+      return clazz.isSubClassOf(decode(rightString));
+    }
     return false;
+  }
+
+  private String decode(String rightString) {
+    if(rightString==null){
+      return null;
+    }
+    return OStringSerializerHelper.decode(rightString.substring(1, rightString.length()-1));
   }
 
   public void toString(Map<Object, Object> params, StringBuilder builder) {
@@ -43,27 +75,26 @@ public class OInstanceofCondition extends OBooleanExpression {
     }
   }
 
-
-  @Override
-  public boolean supportsBasicCalculation() {
+  @Override public boolean supportsBasicCalculation() {
     return left.supportsBasicCalculation();
   }
 
-  @Override
-  protected int getNumberOfExternalCalculations() {
+  @Override protected int getNumberOfExternalCalculations() {
     if (!left.supportsBasicCalculation()) {
       return 1;
     }
     return 0;
   }
 
-  @Override
-  protected List<Object> getExternalCalculationConditions() {
+  @Override protected List<Object> getExternalCalculationConditions() {
     if (!left.supportsBasicCalculation()) {
       return (List) Collections.singletonList(left);
     }
     return Collections.EMPTY_LIST;
   }
 
+  @Override public List<String> getMatchPatternInvolvedAliases() {
+    return left == null ? null : left.getMatchPatternInvolvedAliases();
+  }
 }
 /* JavaCC - OriginalChecksum=0b5eb529744f307228faa6b26f0592dc (do not edit this line) */

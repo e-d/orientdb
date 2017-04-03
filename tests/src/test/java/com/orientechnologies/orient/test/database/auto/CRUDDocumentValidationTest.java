@@ -129,7 +129,6 @@ public class CRUDDocumentValidationTest extends DocumentDBBaseTest {
     database.command(new OCommandSQL("INSERT INTO MyTestClass (keyField,dateTimeField,stringField) VALUES (\"K1\",null,null)"))
         .execute();
     database.reload();
-    database.getStorage().reload();
     database.getMetadata().reload();
     database.close();
     database.open("admin", "admin");
@@ -198,6 +197,7 @@ public class CRUDDocumentValidationTest extends DocumentDBBaseTest {
     }
 
     database.command(new OCommandSQL("ALTER DATABASE " + ODatabase.ATTRIBUTES.VALIDATION.name() + " FALSE")).execute();
+    database.setValidationEnabled(false);
     try {
 
       ODocument doc = new ODocument("MyTestClass");
@@ -205,6 +205,7 @@ public class CRUDDocumentValidationTest extends DocumentDBBaseTest {
 
       doc.delete();
     } finally {
+      database.setValidationEnabled(true);
       database.command(new OCommandSQL("ALTER DATABASE " + ODatabase.ATTRIBUTES.VALIDATION.name() + " TRUE")).execute();
     }
   }

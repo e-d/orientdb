@@ -38,17 +38,20 @@ public class DistributedDbDropAndReCreateAnotherTest extends AbstractServerClust
   @Override
   protected void onAfterExecution() throws Exception {
     do {
-      for (ServerRun server : serverInstance) {
-        final String dbName = getDatabaseURL(server);
+      ServerRun server = serverInstance.get(0);
+      ODatabaseDocumentTx db = new ODatabaseDocumentTx(getDatabaseURL(server));
+      db.open("admin", "admin");
+      waitForDatabaseIsOnline(0, "europe-0", getDatabaseName(), 5000);
+      waitForDatabaseIsOnline(0, "europe-1", getDatabaseName(), 5000);
+      waitForDatabaseIsOnline(0, "europe-2", getDatabaseName(), 5000);
 
-        final ODatabaseDocumentTx db = new ODatabaseDocumentTx(dbName);
-        db.open("admin", "admin");
+      db.drop();
 
-        banner("DROPPING DATABASE " + dbName + " ON SERVER " + server.getServerId());
-        db.drop();
-      }
+      waitForDatabaseIsOffline("europe-0", getDatabaseName(), 5000);
+      waitForDatabaseIsOffline("europe-1", getDatabaseName(), 5000);
+      waitForDatabaseIsOffline("europe-2", getDatabaseName(), 5000);
 
-      ServerRun server = serverInstance.get(lastServerNum);
+      server = serverInstance.get(lastServerNum);
 
       ++lastServerNum;
 
@@ -56,13 +59,25 @@ public class DistributedDbDropAndReCreateAnotherTest extends AbstractServerClust
 
       banner("(RE)CREATING DATABASE " + dbName + " ON SERVER " + server.getServerId());
 
-      final OrientGraphNoTx db = new OrientGraphNoTx(dbName);
-      onAfterDatabaseCreation(db);
-      db.shutdown();
+      final OrientGraphNoTx graph = new OrientGraphNoTx(dbName);
 
-      Thread.sleep(2000);
+      waitForDatabaseIsOnline(0, "europe-0", getDatabaseName(), 15000);
+      waitForDatabaseIsOnline(0, "europe-1", getDatabaseName(), 15000);
+      waitForDatabaseIsOnline(0, "europe-2", getDatabaseName(), 15000);
+
+      checkSameClusters();
+
+      graph.makeActive();
+      onAfterDatabaseCreation(graph);
+      graph.shutdown();
+
+      checkThePersonClassIsPresentOnAllTheServers();
 
     } while (lastServerNum < serverInstance.size());
+
+    banner("EXECUTING FINAL TESTS");
+
+    dumpDistributedDatabaseCfgOfAllTheServers();
 
     executeMultipleTest(0);
   }

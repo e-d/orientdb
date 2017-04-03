@@ -106,6 +106,11 @@ public class OHeartbeatTask extends OAbstractRemoteTask {
   }
 
   @Override
+  public boolean isIdempotent() {
+    return true;
+  }
+
+  @Override
   public long getSynchronousTimeout(final int iSynchNodes) {
     return getDistributedTimeout();
   }

@@ -108,7 +108,7 @@ public class OClusterRemote implements OCluster {
   }
 
   @Override
-  public ORawBuffer readRecord(long clusterPosition) throws IOException {
+  public ORawBuffer readRecord(long clusterPosition, boolean prefetchRecords) throws IOException {
     throw new UnsupportedOperationException("readRecord");
   }
 
@@ -136,6 +136,10 @@ public class OClusterRemote implements OCluster {
   }
 
   public void truncate() throws IOException {
+  }
+
+  @Override
+  public void compact() throws IOException {
   }
 
   public OPhysicalPosition getPhysicalPosition(OPhysicalPosition iPPosition) throws IOException {

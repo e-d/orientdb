@@ -15,6 +15,11 @@
  */
 package com.orientechnologies.orient.server.distributed;
 
+import com.hazelcast.cluster.impl.ClusterServiceImpl;
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.instance.HazelcastInstanceImpl;
+import com.hazelcast.instance.HazelcastInstanceProxy;
+import com.hazelcast.instance.Node;
 import com.orientechnologies.common.io.OFileUtils;
 import com.orientechnologies.common.util.OCallable;
 import com.orientechnologies.orient.core.Orient;
@@ -22,7 +27,9 @@ import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.storage.OStorage;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.OLocalPaginatedStorage;
 import com.orientechnologies.orient.server.OServer;
+import com.orientechnologies.orient.server.OServerMain;
 import com.orientechnologies.orient.server.hazelcast.OHazelcastPlugin;
+import com.orientechnologies.orient.server.network.OServerNetworkListener;
 import com.orientechnologies.orient.server.network.protocol.binary.ONetworkProtocolBinary;
 import com.tinkerpop.blueprints.impls.orient.OrientBaseGraph;
 import com.tinkerpop.blueprints.impls.orient.OrientGraphFactory;
@@ -49,10 +56,6 @@ public class ServerRun {
     return "target/server" + iServerId;
   }
 
-  public static String getDatabasePath(final String iServerId, final String iDatabaseName) {
-    return getServerHome(iServerId) + "/databases/" + iDatabaseName;
-  }
-
   @Override
   public String toString() {
     return server.getDistributedManager().getLocalNodeName() + "(" + serverId + ")";
@@ -67,7 +70,10 @@ public class ServerRun {
   }
 
   public String getBinaryProtocolAddress() {
-    return server.getListenerByProtocol(ONetworkProtocolBinary.class).getListeningAddress(true);
+    final OServerNetworkListener prot = server.getListenerByProtocol(ONetworkProtocolBinary.class);
+    if (prot == null)
+      return null;
+    return prot.getListeningAddress(true);
   }
 
   public void deleteNode() {
@@ -86,6 +92,40 @@ public class ServerRun {
     }
   }
 
+  public void disconnectFrom(final ServerRun... serverIds) {
+    final Node currentNode = getHazelcastNode(((OHazelcastPlugin) server.getDistributedManager()).getHazelcastInstance());
+    for (ServerRun s : serverIds) {
+      final Node otherNode = getHazelcastNode(((OHazelcastPlugin) s.server.getDistributedManager()).getHazelcastInstance());
+      currentNode.clusterService.removeAddress(otherNode.address);
+      otherNode.clusterService.removeAddress(currentNode.address);
+    }
+  }
+
+  public void rejoin(final ServerRun... serverIds) {
+    final Node currentNode = getHazelcastNode(((OHazelcastPlugin) server.getDistributedManager()).getHazelcastInstance());
+    for (ServerRun s : serverIds) {
+      final Node otherNode = getHazelcastNode(((OHazelcastPlugin) s.server.getDistributedManager()).getHazelcastInstance());
+
+      final ClusterServiceImpl clusterService = currentNode.getClusterService();
+      clusterService.merge(otherNode.address);
+    }
+  }
+
+  public static Node getHazelcastNode(final HazelcastInstance hz) {
+    HazelcastInstanceImpl impl = getHazelcastInstanceImpl(hz);
+    return impl != null ? impl.node : null;
+  }
+
+  public static HazelcastInstanceImpl getHazelcastInstanceImpl(final HazelcastInstance hz) {
+    HazelcastInstanceImpl impl = null;
+    if (hz instanceof HazelcastInstanceProxy) {
+      impl = ((HazelcastInstanceProxy) hz).getOriginal();
+    } else if (hz instanceof HazelcastInstanceImpl) {
+      impl = (HazelcastInstanceImpl) hz;
+    }
+    return impl;
+  }
+
   protected OrientBaseGraph createDatabase(final String iName) {
     return createDatabase(iName, null);
   }
@@ -95,18 +135,18 @@ public class ServerRun {
 
     new File(dbPath).mkdirs();
 
-    ODatabaseDocumentTx db = new ODatabaseDocumentTx("plocal:" + dbPath);
-    if (db.exists()) {
+    OrientGraphFactory factory = new OrientGraphFactory("plocal:" + dbPath);
+    if (factory.exists()) {
       System.out.println("Dropping previous database '" + iName + "' under: " + dbPath + "...");
-      db.open("admin", "admin").drop();
+      new ODatabaseDocumentTx("plocal:" + dbPath).open("admin", "admin").drop();
       OFileUtils.deleteRecursively(new File(dbPath));
+
+      factory.drop();
+      factory = new OrientGraphFactory("plocal:" + dbPath);
     }
 
-    final OrientGraphFactory factory = new OrientGraphFactory("plocal:" + dbPath);
-
-    if (iCfgCallback != null) {
+    if (iCfgCallback != null)
       iCfgCallback.call(factory);
-    }
 
     System.out.println("Creating database '" + iName + "' under: " + dbPath + "...");
     return factory.getNoTx();
@@ -127,7 +167,7 @@ public class ServerRun {
     System.setProperty("ORIENTDB_HOME", getServerHome());
 
     if (server == null)
-      server = new OServer();
+      server = OServerMain.create();
 
     server.setServerRootDirectory(getServerHome());
     server.startup(getClass().getClassLoader().getResourceAsStream(iServerConfigFile));
@@ -141,8 +181,14 @@ public class ServerRun {
       try {
         ((OHazelcastPlugin) server.getDistributedManager()).getHazelcastInstance().shutdown();
       } catch (Exception e) {
+        // IGNORE IT
       }
-      server.shutdown();
+
+      try {
+        server.shutdown();
+      } catch (Exception e) {
+        // IGNORE IT
+      }
     }
 
     closeStorages();
@@ -151,12 +197,21 @@ public class ServerRun {
   public void terminateServer() {
     if (server != null) {
       try {
-        final OHazelcastPlugin dPlugin = (OHazelcastPlugin) server.getDistributedManager();
-        if (dPlugin != null && dPlugin.getHazelcastInstance().getLifecycleService().isRunning())
-          ((OHazelcastPlugin) server.getDistributedManager()).getHazelcastInstance().getLifecycleService().terminate();
+        HazelcastInstance hz = ((OHazelcastPlugin) server.getDistributedManager()).getHazelcastInstance();
+        final Node node = getHazelcastNode(hz);
+        node.getConnectionManager().shutdown();
+        node.shutdown(true);
+        hz.getLifecycleService().terminate();
+
       } catch (Exception e) {
+        // IGNORE IT
       }
-      server.shutdown();
+
+      try {
+        server.shutdown();
+      } catch (Exception e) {
+        // IGNORE IT
+      }
     }
 
     closeStorages();
@@ -164,16 +219,22 @@ public class ServerRun {
 
   public void closeStorages() {
     for (OStorage s : Orient.instance().getStorages()) {
-      if (s instanceof OLocalPaginatedStorage && ((OLocalPaginatedStorage) s).getStoragePath().startsWith(getDatabasePath(""))) {
-        s.close(true, false);
-        Orient.instance().unregisterStorage(s);
+      if (s instanceof OLocalPaginatedStorage && new File(((OLocalPaginatedStorage) s).getStoragePath()).getAbsolutePath()
+          .startsWith(getDatabasePath(""))) {
+        try {
+          s.close(true, false);
+          Orient.instance().unregisterStorage(s);
+        } catch (Exception e) {
+          // IGNORE IT
+        }
       }
     }
   }
 
   public void deleteStorages() {
     for (OStorage s : Orient.instance().getStorages()) {
-      if (s instanceof OLocalPaginatedStorage && ((OLocalPaginatedStorage) s).getStoragePath().startsWith(getDatabasePath(""))) {
+      if (s instanceof OLocalPaginatedStorage && new File(((OLocalPaginatedStorage) s).getStoragePath()).getAbsolutePath()
+          .startsWith(getDatabasePath(""))) {
         s.close(true, true);
         Orient.instance().unregisterStorage(s);
       }
@@ -188,4 +249,7 @@ public class ServerRun {
     return getDatabasePath(serverId, iDatabaseName);
   }
 
+  public static String getDatabasePath(final String iServerId, final String iDatabaseName) {
+    return new File(getServerHome(iServerId) + "/databases/" + iDatabaseName).getAbsolutePath();
+  }
 }

@@ -21,6 +21,7 @@ package com.orientechnologies.orient.core.index;
 
 import com.orientechnologies.orient.core.db.ODatabase;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.exception.OInvalidIndexEngineIdException;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.storage.ORecordDuplicatedException;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
@@ -32,6 +33,28 @@ import com.orientechnologies.orient.core.tx.OTransactionIndexChangesPerKey;
  * @author Luca Garulli
  */
 public class OIndexUnique extends OIndexOneValue {
+
+  private final OIndexEngine.Validator<Object, OIdentifiable> UNIQUE_VALIDATOR = new OIndexEngine.Validator<Object, OIdentifiable>() {
+    @Override
+    public Object validate(Object key, OIdentifiable oldValue, OIdentifiable newValue) {
+      if (oldValue != null) {
+        // CHECK IF THE ID IS THE SAME OF CURRENT: THIS IS THE UPDATE CASE
+        if (!oldValue.equals(newValue)) {
+          final Boolean mergeSameKey = metadata != null ? (Boolean) metadata.field(OIndex.MERGE_KEYS) : Boolean.FALSE;
+          if (mergeSameKey == null || !mergeSameKey)
+            throw new ORecordDuplicatedException(String
+                .format("Cannot index record %s: found duplicated key '%s' in index '%s' previously assigned to the record %s",
+                    newValue.getIdentity(), key, getName(), oldValue.getIdentity()), getName(), oldValue.getIdentity());
+        } else
+          return OIndexEngine.Validator.IGNORE;
+      }
+
+      if (!newValue.getIdentity().isPersistent())
+        newValue.getRecord().save();
+      return newValue.getIdentity();
+    }
+  };
+
   public OIndexUnique(String name, String typeId, String algorithm, int version, OAbstractPaginatedStorage storage,
       String valueContainerAlgorithm, ODocument metadata) {
     super(name, typeId, algorithm, version, storage, valueContainerAlgorithm, metadata);
@@ -39,6 +62,9 @@ public class OIndexUnique extends OIndexOneValue {
 
   @Override
   public OIndexOneValue put(Object key, final OIdentifiable iSingleValue) {
+    if (iSingleValue != null && !iSingleValue.getIdentity().isPersistent())
+      throw new IllegalArgumentException("Cannot index a non persistent record (" + iSingleValue.getIdentity() + ")");
+
     key = getCollatingValue(key);
 
     final ODatabase database = getDatabase();
@@ -49,29 +75,16 @@ public class OIndexUnique extends OIndexOneValue {
     }
 
     try {
-
       acquireSharedLock();
       try {
-        final OIdentifiable value = (OIdentifiable) storage.getIndexValue(indexId, key);
-
-        if (value != null) {
-          // CHECK IF THE ID IS THE SAME OF CURRENT: THIS IS THE UPDATE CASE
-          if (!value.equals(iSingleValue)) {
-            final Boolean mergeSameKey = metadata != null ? (Boolean) metadata.field(OIndex.MERGE_KEYS) : Boolean.FALSE;
-            if (mergeSameKey == null || !mergeSameKey)
-              throw new ORecordDuplicatedException(String
-                  .format("Cannot index record %s: found duplicated key '%s' in index '%s' previously assigned to the record %s",
-                      iSingleValue.getIdentity(), key, getName(), value.getIdentity()), getName(), value.getIdentity());
-          } else
-            return this;
-        }
-
-        if (!iSingleValue.getIdentity().isPersistent())
-          iSingleValue.getRecord().save();
-
-        storage.putIndexValue(indexId, key, iSingleValue.getIdentity());
+        while (true)
+          try {
+            storage.validatedPutIndexValue(indexId, key, iSingleValue, UNIQUE_VALIDATOR);
+            break;
+          } catch (OInvalidIndexEngineIdException e) {
+            doReloadIndexEngine();
+          }
         return this;
-
       } finally {
         releaseSharedLock();
       }
@@ -88,7 +101,12 @@ public class OIndexUnique extends OIndexOneValue {
 
   @Override
   public boolean supportsOrderedIterations() {
-    return storage.hasIndexRangeQuerySupport(indexId);
+    while (true)
+      try {
+        return storage.hasIndexRangeQuerySupport(indexId);
+      } catch (OInvalidIndexEngineIdException e) {
+        doReloadIndexEngine();
+      }
   }
 
   @Override

@@ -42,6 +42,7 @@ import java.util.List;
 import java.util.TimerTask;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Level;
 
 /**
  * ETL processor class.
@@ -173,8 +174,12 @@ public class OETLProcessor {
   }
 
   public OETLProcessor parse(final ODocument cfg, final OCommandContext iContext) {
-    return parse(cfg.<Collection<ODocument>>field("begin"), cfg.<ODocument>field("source"), cfg.<ODocument>field("extractor"),
-        cfg.<Collection<ODocument>>field("transformers"), cfg.<ODocument>field("loader"), cfg.<Collection<ODocument>>field("end"),
+    return parse(cfg.<Collection<ODocument>>field("begin"),
+        cfg.<ODocument>field("source"),
+        cfg.<ODocument>field("extractor"),
+        cfg.<Collection<ODocument>>field("transformers"),
+        cfg.<ODocument>field("loader"),
+        cfg.<Collection<ODocument>>field("end"),
         iContext);
   }
 
@@ -188,10 +193,15 @@ public class OETLProcessor {
    * @param iLoader       Loader component configuration
    * @param iEndBlocks    List of Block configurations to execute at the end of processing
    * @param iContext      Execution Context
+   *
    * @return Current OETProcessor instance
    **/
-  public OETLProcessor parse(final Collection<ODocument> iBeginBlocks, final ODocument iSource, final ODocument iExtractor,
-      final Collection<ODocument> iTransformers, final ODocument iLoader, final Collection<ODocument> iEndBlocks,
+  public OETLProcessor parse(final Collection<ODocument> iBeginBlocks,
+      final ODocument iSource,
+      final ODocument iExtractor,
+      final Collection<ODocument> iTransformers,
+      final ODocument iLoader,
+      final Collection<ODocument> iEndBlocks,
       final OCommandContext iContext) {
     if (iExtractor == null)
       throw new IllegalArgumentException("No Extractor configured");
@@ -205,6 +215,8 @@ public class OETLProcessor {
       configureSource(iSource, iContext);
 
       configureExtractors(iExtractor, iContext);
+
+      copySkipDuplicatestoLoaderConf(iTransformers, iLoader);
 
       configureLoader(iLoader, iContext);
 
@@ -225,6 +237,21 @@ public class OETLProcessor {
       throw OException.wrapException(new OConfigurationException("Error on creating ETL processor"), e);
     }
     return this;
+  }
+
+  private void copySkipDuplicatestoLoaderConf(Collection<ODocument> iTransformers, ODocument iLoader) {
+    if (iTransformers != null) {
+      for (ODocument transformer : iTransformers) {
+        if (transformer.containsField("vertex")) {
+          ODocument vertexConf = transformer.field("vertex");
+          if (vertexConf.containsField("skipDuplicates")) {
+            ODocument loaderConf = iLoader.field(iLoader.fieldNames()[0]);
+            loaderConf.field("skipDuplicates", vertexConf.field("skipDuplicates"));
+          }
+        }
+      }
+    }
+
   }
 
   private void configureEndBlocks(Collection<ODocument> iEndBlocks, OCommandContext iContext)
@@ -560,7 +587,22 @@ public class OETLProcessor {
   }
 
   public enum LOG_LEVELS {
-    NONE, ERROR, INFO, DEBUG
+    NONE(Level.OFF),
+    ERROR(Level.SEVERE),
+    INFO(Level.INFO),
+    DEBUG(Level.FINE);
+
+    private final Level julLevel;
+
+    LOG_LEVELS(Level julLevel) {
+
+      this.julLevel = julLevel;
+    }
+
+    public Level toJulLevel() {
+      return julLevel;
+    }
+
   }
 
   private static final class OETLPipelineWorker implements Callable<Boolean> {

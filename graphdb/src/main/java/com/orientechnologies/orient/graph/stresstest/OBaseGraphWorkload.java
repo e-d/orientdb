@@ -35,6 +35,8 @@ import com.tinkerpop.blueprints.impls.orient.*;
  * @author Luca Garulli
  */
 public abstract class OBaseGraphWorkload extends OBaseWorkload implements OCheckWorkload {
+  protected String className = "TestVertex";
+
   public class OWorkLoadContext extends OBaseWorkload.OBaseWorkLoadContext {
     OrientBaseGraph graph;
     OrientVertex    lastVertexToConnect;
@@ -62,7 +64,7 @@ public abstract class OBaseGraphWorkload extends OBaseWorkload implements OCheck
     if (database == null)
       throw new IllegalArgumentException("Error on opening database " + databaseIdentifier.getName());
 
-    return new OrientGraphNoTx((ODatabaseDocumentTx) database);
+    return (OrientGraphNoTx) OrientGraphFactory.getNoTxGraphImplFactory().getGraph((ODatabaseDocumentTx) database);
   }
 
   protected OrientGraph getGraph(final ODatabaseIdentifier databaseIdentifier) {
@@ -72,7 +74,7 @@ public abstract class OBaseGraphWorkload extends OBaseWorkload implements OCheck
 
     database.setProperty(OStorageRemote.PARAM_CONNECTION_STRATEGY, connectionStrategy.toString());
 
-    final OrientGraph g = new OrientGraph((ODatabaseDocumentTx) database);
+    final OrientGraph g = (OrientGraph) OrientGraphFactory.getTxGraphImplFactory().getGraph((ODatabaseDocumentTx) database);
     g.setAutoStartTx(false);
     return g;
   }
@@ -85,7 +87,7 @@ public abstract class OBaseGraphWorkload extends OBaseWorkload implements OCheck
       public void onMessage(String iText) {
         System.out.print("   - " + iText);
       }
-    });
+    }, null);
   }
 
   @Override

@@ -58,6 +58,8 @@ public interface OCluster {
    */
   void truncate() throws IOException;
 
+  void compact() throws IOException;
+
   /**
    * Allocates a physical position pointer on the storage for generate an id without a content.
    *
@@ -93,7 +95,7 @@ public interface OCluster {
    */
   void recycleRecord(long clusterPosition, byte[] content, int recordVersion, byte recordType) throws IOException;
 
-  ORawBuffer readRecord(long clusterPosition) throws IOException;
+  ORawBuffer readRecord(long clusterPosition, boolean prefetchRecords) throws IOException;
 
   ORawBuffer readRecordIfVersionIsNotLatest(long clusterPosition, int recordVersion) throws IOException, ORecordNotFoundException;
 

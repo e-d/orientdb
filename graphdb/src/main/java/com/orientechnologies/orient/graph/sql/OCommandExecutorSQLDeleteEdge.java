@@ -33,6 +33,7 @@ import com.orientechnologies.orient.core.sql.OCommandExecutorSQLSetAware;
 import com.orientechnologies.orient.core.sql.OCommandSQLParsingException;
 import com.orientechnologies.orient.core.sql.OSQLEngine;
 import com.orientechnologies.orient.core.sql.filter.OSQLFilter;
+import com.orientechnologies.orient.core.sql.parser.ODeleteEdgeStatement;
 import com.orientechnologies.orient.core.sql.query.OSQLAsynchQuery;
 import com.tinkerpop.blueprints.Direction;
 import com.tinkerpop.blueprints.Edge;
@@ -129,6 +130,11 @@ public class OCommandExecutorSQLDeleteEdge extends OCommandExecutorSQLSetAware
               clazz = graph.getEdgeType(OrientEdgeType.CLASS_NAME);
 
             where = parserGetCurrentPosition() > -1 ? " " + parserText.substring(parserGetCurrentPosition()) : "";
+            if(this.preParsedStatement!=null){
+              StringBuilder builder = new StringBuilder();
+              ((ODeleteEdgeStatement)this.preParsedStatement).getWhereClause().toString(parameters, builder);
+              where = builder.toString();
+            }
 
             compiledFilter = OSQLEngine.getInstance().parseCondition(where, getContext(), KEYWORD_WHERE);
             break;
@@ -399,8 +405,7 @@ public class OCommandExecutorSQLDeleteEdge extends OCommandExecutorSQLSetAware
   }
 
   public DISTRIBUTED_EXECUTION_MODE getDistributedExecutionMode() {
-    return query != null && !getDatabase().getTransaction().isActive() ? DISTRIBUTED_EXECUTION_MODE.REPLICATE
-        : DISTRIBUTED_EXECUTION_MODE.LOCAL;
+    return DISTRIBUTED_EXECUTION_MODE.LOCAL;
   }
 
   @Override
