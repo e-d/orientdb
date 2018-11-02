@@ -2285,6 +2285,7 @@ public class OConsoleDatabaseApp extends OrientConsole implements OCommandOutput
     } finally {
       message("\nDatabase restored in %.2f seconds", ((float) (System.currentTimeMillis() - startTime) / 1000));
     }
+    }
 
     @ConsoleCommand(description = "Export a database", splitInWords = false, onlineHelp = "Console-Command-Export")
     public void exportDatabase(@ConsoleParameter(name = "options", description = "Export options") final String iText)

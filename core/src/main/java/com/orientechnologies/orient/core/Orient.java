@@ -258,6 +258,9 @@ public class Orient extends OListenerManger<OOrientListener> {
         }
 
       initShutdownQueue();
+    } catch (Throwable t) {
+      OLogManager.instance().error(this, "Error initializing Orient.", t);
+      throw new RuntimeException(t);
     } finally {
       engineLock.writeLock().unlock();
     }

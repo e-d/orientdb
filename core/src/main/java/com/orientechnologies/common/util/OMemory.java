@@ -210,7 +210,7 @@ public class OMemory {
       }
     }
 
-    final int max32BitCacheSize = 512;
+    final int max32BitCacheSize = 640;
     if (getJavaBitWidth() == 32 && diskCacheSize > max32BitCacheSize) {
       OLogManager.instance()
           .info(OGlobalConfiguration.class, "32 bit JVM is detected. Lowering disk cache size from %,dMB to %,dMB.", diskCacheSize,
